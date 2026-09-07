@@ -26,10 +26,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Syntax-check source runtime
+        run: node --check scripts/userscript-runtime.js
       - name: Run optimizer tests
         run: npm test
       - name: Build self-contained Tampermonkey userscript
         run: npm run build:userscript
+      - name: Syntax-check generated userscript
+        run: node --check edison-rozvrh-assistant.user.js
       - name: Commit generated userscript when changed
         run: |
           if git diff --quiet -- edison-rozvrh-assistant.user.js; then
