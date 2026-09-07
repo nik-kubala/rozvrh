@@ -8,8 +8,8 @@ const rawUrl = "https://raw.githubusercontent.com/nik-kubala/rozvrh/main/edison-
 const metadata = `// ==UserScript==
 // @name         EDISON Rozvrh Assistant
 // @namespace    https://github.com/nik-kubala/rozvrh
-// @version      2.0.0
-// @description  Jedným klikom spustí adaptívny zápis rozvrhu VŠB-TUO s robustnými fallbackmi a LIVE kapacitami.
+// @version      2.1.0
+// @description  Jedným klikom spustí adaptívny zápis rozvrhu VŠB-TUO; sám obnoví LIVE dáta a bezpečne čaká na 10:00.
 // @author       nik-kubala
 // @match        https://edison.sso.vsb.cz/wps/*
 // @updateURL    ${rawUrl}
