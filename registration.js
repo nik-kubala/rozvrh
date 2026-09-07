@@ -2,7 +2,8 @@
   "use strict";
 
   const utils = window.ROZVRH_PLAN_UTILS;
-  if (!utils) return;
+  const prefs = window.ROZVRH_PREFERENCES;
+  if (!utils || !prefs) return;
 
   const {
     data,
@@ -11,11 +12,16 @@
     subjectById,
     sessionById,
     lectureAnchors,
-    sessionsAt
+    sessionsAt,
+    metrics
   } = utils;
 
-  const REVIEW_KEY = "rozvrh-plan-review-v1";
-  const STORAGE_KEY = "rozvrh-registration-v2";
+  const STORAGE_KEY = "rozvrh-registration-v3";
+  const hardRejectAt = Number(prefs.hardRejectAt || 5);
+  const importance = prefs.subjectImportance || {};
+  const slotPenalty = prefs.slotPenalty || [8, 0, 2, 7, 18, 32, 48];
+  const thursdaySlotPenalty = prefs.thursdaySlotPenalty || [0, 8, 18, 35, 60, 95, 140];
+  const rules = prefs.rules || {};
 
   const preferredTemplate =
     (data.templates || []).find((template) => template.id === "a-compact") ||
@@ -26,6 +32,12 @@
   for (const id of preferredTemplate.sessionIds || []) {
     const session = sessionById.get(id);
     if (session?.type === "C") preferredExerciseBySubject.set(session.subjectId, session);
+  }
+
+  function consensusRating(planOrId) {
+    const id = typeof planOrId === "string" ? planOrId : planOrId?.id;
+    const value = Number(prefs.consensusRatings?.[id]);
+    return Number.isFinite(value) ? value : 5;
   }
 
   function defaultRegistrationState() {
@@ -43,16 +55,6 @@
       };
     } catch {
       return defaultRegistrationState();
-    }
-  }
-
-  function approvedPlanIds() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(REVIEW_KEY) || "null");
-      const decisions = parsed?.decisions || {};
-      return new Set(Object.entries(decisions).filter(([, status]) => status === "approved").map(([id]) => id));
-    } catch {
-      return new Set();
     }
   }
 
@@ -96,6 +98,10 @@
     return a && b && a.day === b.day && a.slot === b.slot;
   }
 
+  function coordKey(coord) {
+    return `${coord.day}:${coord.slot}`;
+  }
+
   function availableSessions(subjectId, coord, extraBlockedId = null) {
     const blocked = new Set(registrationState.blocked);
     if (extraBlockedId) blocked.add(extraBlockedId);
@@ -116,13 +122,55 @@
     return true;
   }
 
-  function approvedPlans() {
-    const approved = approvedPlanIds();
-    return plans.filter((plan) => approved.has(plan.id));
+  function planScheduleCost(plan) {
+    let cost = 0;
+    for (const subjectId of raw.subjects) {
+      const coord = plan.bySubject[subjectId];
+      cost += Number(slotPenalty[coord.slot] || 0);
+
+      if (coord.day === 3) {
+        cost += Number(rules.thursdayBasePenalty || 320);
+        cost += Number(thursdaySlotPenalty[coord.slot] || 0);
+      } else if (coord.day === 4) {
+        cost += Number(rules.fridayBasePenalty || 2200);
+      }
+    }
+
+    const m = metrics(plan);
+    cost += Math.max(0, m.activeDays - 3) * Number(rules.extraSchoolDayPenalty || 160);
+    cost += m.gaps * Number(rules.gapPenalty || 12);
+    return cost;
+  }
+
+  const planMeta = new Map();
+  for (const plan of plans) {
+    const rating = consensusRating(plan);
+    const scheduleCost = planScheduleCost(plan);
+    const cost = Math.max(0, rating - 1) * Number(rules.ratingWeight || 600) + scheduleCost;
+    const qualityWeight = Math.exp(-Math.max(0, rating - 1) * 0.72) * Math.exp(-scheduleCost / 1000);
+    planMeta.set(plan.id, { rating, scheduleCost, cost, qualityWeight });
+  }
+
+  function meta(plan) {
+    return planMeta.get(plan.id) || { rating: 5, scheduleCost: 9999, cost: 9999, qualityWeight: 0.0001 };
+  }
+
+  function planCost(plan) {
+    return meta(plan).cost;
+  }
+
+  function qualityMass(list) {
+    return list.reduce((sum, plan) => sum + meta(plan).qualityWeight, 0);
+  }
+
+  function usablePlans() {
+    return [...plans]
+      .filter((plan) => consensusRating(plan) < hardRejectAt)
+      .sort((a, b) => planCost(a) - planCost(b) || a.id.localeCompare(b.id));
   }
 
   function remainingPlans(extraBlockedId = null) {
-    return approvedPlans().filter((plan) => planIsFeasible(plan, extraBlockedId));
+    return usablePlans().filter((plan) => planIsFeasible(plan, extraBlockedId));
   }
 
   function preferredSession(subjectId, coord, blockedId = null) {
@@ -141,34 +189,80 @@
     return raw.subjects.filter((subjectId) => !sameCoord(planA.bySubject[subjectId], planB.bySubject[subjectId]));
   }
 
-  function buildPriorities(remaining) {
-    if (!remaining.length) return [];
-    const best = remaining[0];
+  function supportMass(remaining, subjectId, coord) {
+    return qualityMass(remaining.filter((plan) => sameCoord(plan.bySubject[subjectId], coord)));
+  }
+
+  function chooseTargetPlan(remaining) {
+    if (!remaining.length) return null;
+    const totalMass = Math.max(qualityMass(remaining), 1e-9);
+    const unlocked = raw.subjects.filter((subjectId) => !registrationState.locked[subjectId]);
+    const candidates = remaining.slice(0, Math.min(50, remaining.length));
+
+    let best = null;
+    for (const plan of candidates) {
+      const supports = unlocked.map((subjectId) => {
+        const coord = plan.bySubject[subjectId];
+        return supportMass(remaining, subjectId, coord) / totalMass;
+      });
+      const avgSupport = supports.length ? supports.reduce((a, b) => a + b, 0) / supports.length : 1;
+      const minSupport = supports.length ? Math.min(...supports) : 1;
+      const robustnessPenalty =
+        (1 - avgSupport) * Number(rules.robustnessAveragePenalty || 260) +
+        (1 - minSupport) * Number(rules.robustnessWeakLinkPenalty || 520);
+      const robustScore = planCost(plan) + robustnessPenalty;
+
+      if (!best || robustScore < best.robustScore) {
+        best = { plan, avgSupport, minSupport, robustScore };
+      }
+    }
+    return best;
+  }
+
+  function bestPlanCost(list) {
+    if (!list.length) return Infinity;
+    return Math.min(...list.map(planCost));
+  }
+
+  function buildPriorities(remaining, targetInfo) {
+    if (!remaining.length || !targetInfo?.plan) return [];
+    const target = targetInfo.plan;
+    const totalMass = Math.max(qualityMass(remaining), 1e-9);
+    const currentBestCost = bestPlanCost(remaining);
     const priorities = [];
 
     for (const subjectId of raw.subjects) {
       if (registrationState.locked[subjectId]) continue;
       const subject = subjectById.get(subjectId);
-      const coord = best.bySubject[subjectId];
+      const coord = target.bySubject[subjectId];
       const available = availableSessions(subjectId, coord);
       const session = preferredSession(subjectId, coord);
       if (!session) continue;
 
       const sameTimeAlternatives = Math.max(0, available.length - 1);
-      let afterNo;
-      if (sameTimeAlternatives > 0) {
-        afterNo = remaining;
-      } else {
-        afterNo = remaining.filter((plan) => {
-          const other = plan.bySubject[subjectId];
-          return !sameCoord(other, coord);
-        });
-      }
-
       const afterYes = remaining.filter((plan) => sameCoord(plan.bySubject[subjectId], coord));
-      const lossOnNo = remaining.length - afterNo.length;
-      const fallback = afterNo[0] || null;
-      const changes = fallback ? changedSubjects(best, fallback).length : 99;
+      const afterNo = remaining.filter((plan) => planIsFeasible(plan, session.id));
+      const afterYesMass = qualityMass(afterYes);
+      const afterNoMass = qualityMass(afterNo);
+      const noPreserveRatio = afterNoMass / totalMass;
+      const yesPreserveRatio = afterYesMass / totalMass;
+      const lossOnNoRatio = Math.max(0, 1 - noPreserveRatio);
+      const fallback = chooseTargetPlan(afterNo)?.plan || null;
+      const changes = fallback ? changedSubjects(target, fallback).length : 99;
+      const regretNo = afterNo.length ? Math.max(0, bestPlanCost(afterNo) - currentBestCost) : 5000;
+      const distinctCoords = new Set(remaining.map((plan) => coordKey(plan.bySubject[subjectId]))).size;
+      const scarcity = 1 / Math.max(1, distinctCoords);
+      const subjectImportance = Number(importance[subjectId] || 40);
+
+      let priorityScore =
+        subjectImportance * 5.5 +
+        lossOnNoRatio * 650 +
+        Math.min(regretNo, 1200) * 0.35 +
+        scarcity * 90 +
+        yesPreserveRatio * 70 -
+        sameTimeAlternatives * 90;
+
+      if (!afterNo.length) priorityScore += 10000;
 
       priorities.push({
         subject,
@@ -179,29 +273,35 @@
         sameTimeAlternatives,
         afterNo,
         afterYes,
-        lossOnNo,
+        afterNoMass,
+        afterYesMass,
+        noPreserveRatio,
+        yesPreserveRatio,
+        lossOnNoRatio,
         fallback,
         changes,
+        regretNo,
+        distinctCoords,
+        subjectImportance,
+        priorityScore,
         total: remaining.length
       });
     }
 
-    priorities.sort((a, b) => {
-      if (b.lossOnNo !== a.lossOnNo) return b.lossOnNo - a.lossOnNo;
-      if (a.sameTimeAlternatives !== b.sameTimeAlternatives) return a.sameTimeAlternatives - b.sameTimeAlternatives;
-      if (b.changes !== a.changes) return b.changes - a.changes;
-      return a.subject.name.localeCompare(b.subject.name);
-    });
+    priorities.sort((a, b) =>
+      b.priorityScore - a.priorityScore ||
+      b.subjectImportance - a.subjectImportance ||
+      a.subject.name.localeCompare(b.subject.name)
+    );
 
     return priorities;
   }
 
   function impactLevel(item) {
     if (item.afterNo.length === 0) return ["Kritické", "critical"];
-    const ratio = item.lossOnNo / Math.max(1, item.total);
-    if (ratio >= 0.65 || item.changes >= 3) return ["Kritické", "critical"];
-    if (ratio >= 0.35 || item.changes >= 2) return ["Dôležité", "important"];
-    if (ratio >= 0.15) return ["Stredné", "medium"];
+    if (item.lossOnNoRatio >= 0.55 || item.regretNo >= 500 || item.changes >= 3) return ["Kritické", "critical"];
+    if (item.lossOnNoRatio >= 0.3 || item.regretNo >= 250 || item.changes >= 2) return ["Dôležité", "important"];
+    if (item.lossOnNoRatio >= 0.12 || item.subjectImportance >= 70) return ["Stredné", "medium"];
     return ["Nízke", "low"];
   }
 
@@ -209,29 +309,33 @@
     return `${data.days[session.day]} · ${data.slots[session.slot]} · ${session.group}`;
   }
 
-  function impactText(item) {
-    if (item.sameTimeAlternatives > 0) {
-      return `Ak ${item.session.group} nevyjde, v rovnakom čase ostáva ešte ${item.sameTimeAlternatives} ${item.sameTimeAlternatives === 1 ? "skupina" : "skupiny"}; žiadny schválený layout tým zatiaľ nestratíš.`;
-    }
-    if (!item.afterNo.length) {
-      return "Ak tento termín nevyjde, z aktuálne možných schválených rozvrhov nezostane ani jeden.";
-    }
-    const changed = changedSubjects(item.afterYes[0] || null, item.fallback)
-      .filter((subjectId) => subjectId !== item.subjectId)
-      .map((subjectId) => subjectById.get(subjectId)?.short || subjectId);
-    const extra = changed.length ? ` Najlepší fallback ${item.fallback.id} mení aj: ${changed.join(", ")}.` : ` Najlepší fallback je ${item.fallback.id}.`;
-    return `Po NIE zostane ${item.afterNo.length} z ${item.total} aktuálne možných schválených rozvrhov.${extra}`;
+  function formatRating(value) {
+    return Number(value).toLocaleString("sk-SK", { maximumFractionDigits: 1 });
   }
 
-  function renderCurrent(approved, remaining, priorities) {
+  function impactText(item) {
+    if (item.sameTimeAlternatives > 0) {
+      return `Ak ${item.session.group} nevyjde, v rovnakom čase ostáva ešte ${item.sameTimeAlternatives} ${item.sameTimeAlternatives === 1 ? "skupina" : "skupiny"}. Layout tým zatiaľ nestrácaš.`;
+    }
+    if (!item.afterNo.length) {
+      return "Ak tento termín nevyjde, nezostane žiadny tebou prijateľný pevný rozvrh.";
+    }
+
+    const preserved = Math.round(item.noPreserveRatio * 100);
+    const changed = item.fallback
+      ? changedSubjects(item.afterYes[0] || null, item.fallback)
+          .filter((subjectId) => subjectId !== item.subjectId)
+          .map((subjectId) => subjectById.get(subjectId)?.short || subjectId)
+      : [];
+    const extra = changed.length ? ` Najlepší fallback mení aj: ${changed.join(", ")}.` : "";
+    return `Po NIE zostane ${item.afterNo.length}/${item.total} layoutov a približne ${preserved} % váhy kvalitných možností.${extra}`;
+  }
+
+  function renderCurrent(usable, remaining, priorities, targetInfo) {
     const done = Object.keys(registrationState.locked).length;
 
-    if (!approved.length) {
-      els.current.innerHTML = `<div class="registration-empty bad-state">
-        <p class="eyebrow">Najprv schváľ fallbacky</p>
-        <h2>Zatiaľ nemáš schválený ani jeden pevný rozvrh.</h2>
-        <p>Prejdi do „Schváliť rozvrhy“ a označ tie, ktoré by si bol ochotný používať. LIVE potom bude pracovať výhradne s nimi.</p>
-      </div>`;
+    if (!usable.length) {
+      els.current.innerHTML = `<div class="registration-empty bad-state"><h2>Nie sú žiadne použiteľné pevné rozvrhy.</h2></div>`;
       els.yes.disabled = true;
       els.no.disabled = true;
       return;
@@ -239,9 +343,9 @@
 
     if (!remaining.length) {
       els.current.innerHTML = `<div class="registration-empty bad-state">
-        <p class="eyebrow">Došli schválené fallbacky</p>
-        <h2>Aktuálne ÁNO/NIE už nezodpovedajú žiadnemu rozvrhu, ktorý si schválil.</h2>
-        <p>Vráť posledný krok alebo schváľ ďalšie fallback rozvrhy.</p>
+        <p class="eyebrow">Došli fallbacky</p>
+        <h2>Aktuálne ÁNO/NIE už nezodpovedajú žiadnemu tebou prijateľnému rozvrhu.</h2>
+        <p>Vráť posledný krok. Rozvrhy, ktoré si v oboch hodnoteniach označil 5/5, sú zámerne úplne zakázané.</p>
       </div>`;
       els.yes.disabled = true;
       els.no.disabled = true;
@@ -252,7 +356,7 @@
       els.current.innerHTML = `<div class="registration-empty success-state">
         <p class="eyebrow">Cvičenia hotové</p>
         <h2>Všetkých ${done} cvičení je potvrdených.</h2>
-        <p>Finálny rozvrh zodpovedá schválenému layoutu ${escapeHtml(remaining[0].id)}. Teraz môžeš riešiť prednášky.</p>
+        <p>Finálny rozvrh zodpovedá robustnému layoutu ${escapeHtml(targetInfo?.plan?.id || remaining[0].id)}. Teraz môžeš riešiť prednášky.</p>
       </div>`;
       els.yes.disabled = true;
       els.no.disabled = true;
@@ -261,10 +365,11 @@
 
     const item = priorities[0];
     const [label, cls] = impactLevel(item);
+    const target = targetInfo.plan;
     els.current.innerHTML = `<div class="registration-now">
       <div class="registration-now-top">
         <div>
-          <p class="eyebrow">Teraz klikni · cieľový layout ${escapeHtml(remaining[0].id)}</p>
+          <p class="eyebrow">Teraz klikni · robustný cieľ ${escapeHtml(target.id)} · priemer ${escapeHtml(formatRating(consensusRating(target)))}/5</p>
           <h2>${escapeHtml(item.subject.name)}</h2>
         </div>
         <span class="impact-badge ${cls}">${label}</span>
@@ -284,29 +389,32 @@
 
     els.priority.innerHTML = priorities.map((item, index) => {
       const [label, cls] = impactLevel(item);
+      const preserved = Math.round(item.noPreserveRatio * 100);
       return `<div class="priority-row${index === 0 ? " is-next" : ""}">
         <span class="priority-number">${index + 1}</span>
         <div class="priority-main">
           <strong>${escapeHtml(item.subject.short)}</strong>
           <span>${escapeHtml(formatSession(item.session))}</span>
-          <small>po NIE: ${item.afterNo.length}/${item.total} layoutov</small>
+          <small>po NIE: ${item.afterNo.length}/${item.total} layoutov · ~${preserved} % kvalitnej váhy · dôležitosť ${item.subjectImportance}</small>
         </div>
         <span class="impact-badge ${cls}">${label}</span>
       </div>`;
     }).join("");
   }
 
-  function renderProgress(approved, remaining) {
+  function renderProgress(usable, remaining) {
     const lockedCount = Object.keys(registrationState.locked).length;
     const blockedCount = registrationState.blocked.length;
     const percent = Math.round((lockedCount / raw.subjects.length) * 100);
+    const veryGoodRemaining = remaining.filter((plan) => consensusRating(plan) <= 2).length;
 
     els.progress.innerHTML = `<div class="progress-bar" aria-label="${percent} % cvičení zapísaných"><span style="width:${percent}%"></span></div>
       <div class="progress-stats">
         <div><span>Zapísané</span><strong>${lockedCount}/${raw.subjects.length}</strong></div>
-        <div><span>Schválené</span><strong>${approved.length}</strong></div>
+        <div><span>Pevné použiteľné</span><strong>${usable.length}</strong></div>
         <div><span>Stále možné</span><strong>${remaining.length}</strong></div>
-        <div><span>Nevyšli</span><strong>${blockedCount}</strong></div>
+        <div><span>Z toho priemer ≤2</span><strong>${veryGoodRemaining}</strong></div>
+        <div><span>Nevyšli termíny</span><strong>${blockedCount}</strong></div>
       </div>`;
   }
 
@@ -323,13 +431,13 @@
     };
   }
 
-  function renderSchedule(remaining) {
-    if (!remaining.length) {
+  function renderSchedule(remaining, targetInfo) {
+    if (!remaining.length || !targetInfo?.plan) {
       els.schedule.innerHTML = "";
       return;
     }
 
-    const plan = remaining[0];
+    const plan = targetInfo.plan;
     const exercises = raw.subjects.map((subjectId) => displayExercise(plan, subjectId)).filter(Boolean);
     const events = [...lectureAnchors, ...exercises].sort((a, b) => a.day - b.day || a.slot - b.slot);
     const byDay = new Map();
@@ -338,7 +446,9 @@
       byDay.get(event.day).push(event);
     }
 
-    let html = `<div class="registration-best-plan"><strong>${escapeHtml(plan.id)}</strong> · kategória ${escapeHtml(plan.tier)} · ${remaining.length} schválených layoutov stále možných</div>`;
+    const avgSupport = Math.round(targetInfo.avgSupport * 100);
+    const minSupport = Math.round(targetInfo.minSupport * 100);
+    let html = `<div class="registration-best-plan"><strong>${escapeHtml(plan.id)}</strong> · priemer ${escapeHtml(formatRating(consensusRating(plan)))}/5 · ${remaining.length} layoutov stále možných · podpora cieľa priemerne ${avgSupport} %, najslabší blok ${minSupport} %</div>`;
     html += `<div class="registration-week">`;
     data.days.forEach((day, dayIndex) => {
       const dayEvents = (byDay.get(dayIndex) || []).sort((a, b) => a.slot - b.slot);
@@ -381,16 +491,17 @@
   }
 
   function renderAll() {
-    const approved = approvedPlans();
-    const remaining = approved.filter((plan) => planIsFeasible(plan));
-    const priorities = buildPriorities(remaining);
-    renderCurrent(approved, remaining, priorities);
+    const usable = usablePlans();
+    const remaining = usable.filter((plan) => planIsFeasible(plan));
+    const targetInfo = chooseTargetPlan(remaining);
+    const priorities = buildPriorities(remaining, targetInfo);
+    renderCurrent(usable, remaining, priorities, targetInfo);
     renderPriority(priorities);
-    renderProgress(approved, remaining);
-    renderSchedule(remaining);
+    renderProgress(usable, remaining);
+    renderSchedule(remaining, targetInfo);
     renderHistory();
     els.undo.disabled = undoStack.length === 0;
-    return { approved, remaining, priorities };
+    return { usable, remaining, targetInfo, priorities };
   }
 
   function applyResult(result) {
@@ -453,10 +564,6 @@
     undoStack.length = 0;
     saveRegistrationState();
     renderAll();
-  });
-
-  window.addEventListener("rozvrh-plan-review-changed", () => {
-    if (!view.hidden) renderAll();
   });
 
   renderAll();
