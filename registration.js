@@ -1,17 +1,21 @@
 (() => {
   "use strict";
 
-  const data = window.ROZVRH_DATA;
-  if (!data) return;
+  const utils = window.ROZVRH_PLAN_UTILS;
+  if (!utils) return;
 
-  const STORAGE_KEY = "rozvrh-registration-v1";
-  const subjectById = new Map(data.subjects.map((subject) => [subject.id, subject]));
-  const sessionById = new Map();
-  for (const subject of data.subjects) {
-    for (const session of subject.sessions) {
-      sessionById.set(session.id, { ...session, subjectId: subject.id });
-    }
-  }
+  const {
+    data,
+    raw,
+    plans,
+    subjectById,
+    sessionById,
+    lectureAnchors,
+    sessionsAt
+  } = utils;
+
+  const REVIEW_KEY = "rozvrh-plan-review-v1";
+  const STORAGE_KEY = "rozvrh-registration-v2";
 
   const preferredTemplate =
     (data.templates || []).find((template) => template.id === "a-compact") ||
@@ -19,49 +23,13 @@
     { sessionIds: [] };
 
   const preferredExerciseBySubject = new Map();
-  const lectureAnchors = [];
   for (const id of preferredTemplate.sessionIds || []) {
     const session = sessionById.get(id);
-    if (!session) continue;
-    if (session.type === "C") preferredExerciseBySubject.set(session.subjectId, session);
-    if (session.type === "P") lectureAnchors.push(session);
+    if (session?.type === "C") preferredExerciseBySubject.set(session.subjectId, session);
   }
-
-  const exerciseSubjects = data.subjects.filter(
-    (subject) => subject.sessions.some((session) => session.type === "C")
-  );
-
-  const baselineEvents = [
-    ...lectureAnchors,
-    ...exerciseSubjects
-      .map((subject) => preferredExerciseBySubject.get(subject.id))
-      .filter(Boolean)
-  ];
-
-  function dayMetrics(events) {
-    const result = new Map();
-    for (let day = 0; day < data.days.length; day += 1) {
-      const slots = [...new Set(events.filter((event) => event.day === day).map((event) => event.slot))].sort((a, b) => a - b);
-      if (!slots.length) continue;
-      const min = slots[0];
-      const max = slots[slots.length - 1];
-      result.set(day, {
-        min,
-        max,
-        gaps: Math.max(0, max - min + 1 - slots.length)
-      });
-    }
-    return result;
-  }
-
-  const baselineMetrics = dayMetrics(baselineEvents);
 
   function defaultRegistrationState() {
-    return {
-      locked: {},
-      blocked: [],
-      history: []
-    };
+    return { locked: {}, blocked: [], history: [] };
   }
 
   function loadRegistrationState() {
@@ -75,6 +43,16 @@
       };
     } catch {
       return defaultRegistrationState();
+    }
+  }
+
+  function approvedPlanIds() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(REVIEW_KEY) || "null");
+      const decisions = parsed?.decisions || {};
+      return new Set(Object.entries(decisions).filter(([, status]) => status === "approved").map(([id]) => id));
+    } catch {
+      return new Set();
     }
   }
 
@@ -114,194 +92,103 @@
     return JSON.parse(JSON.stringify(registrationState));
   }
 
-  function slotKey(session) {
-    return `${session.day}-${session.slot}`;
+  function sameCoord(a, b) {
+    return a && b && a.day === b.day && a.slot === b.slot;
   }
 
-  const anchorSlots = new Set(lectureAnchors.map(slotKey));
-
-  function localSessionCost(subjectId, session) {
-    const preferred = preferredExerciseBySubject.get(subjectId);
-    if (!preferred) return 0;
-    if (session.id === preferred.id) return 0;
-    if (session.day === preferred.day && session.slot === preferred.slot) return 0.25;
-
-    const dayDiff = Math.abs(session.day - preferred.day);
-    const slotDiff = Math.abs(session.slot - preferred.slot);
-    if (dayDiff === 0) return 12 + 8 * slotDiff;
-    return 12 + 22 * dayDiff + 4 * slotDiff;
-  }
-
-  function globalSchedulePenalty(exercises) {
-    const events = [...lectureAnchors, ...exercises];
-    const metrics = dayMetrics(events);
-    let penalty = 0;
-
-    if (metrics.has(3)) penalty += 400;
-    if (metrics.has(4)) penalty += 650;
-
-    for (let day = 0; day < data.days.length; day += 1) {
-      const current = metrics.get(day);
-      const baseline = baselineMetrics.get(day);
-      if (!current) continue;
-
-      if (!baseline) {
-        penalty += 80;
-        continue;
-      }
-
-      if (current.min < baseline.min) penalty += (baseline.min - current.min) * 5;
-      if (current.max > baseline.max) penalty += (current.max - baseline.max) * 5;
-      penalty += current.gaps * 10;
-    }
-
-    return penalty;
-  }
-
-  function hasConflicts(exercises) {
-    const occupied = new Set(anchorSlots);
-    for (const session of exercises) {
-      const key = slotKey(session);
-      if (occupied.has(key)) return true;
-      occupied.add(key);
-    }
-    return false;
-  }
-
-  function findBestPlan(extraBlockedId = null) {
+  function availableSessions(subjectId, coord, extraBlockedId = null) {
     const blocked = new Set(registrationState.blocked);
     if (extraBlockedId) blocked.add(extraBlockedId);
+    return sessionsAt(subjectId, coord.day, coord.slot).filter((session) => !blocked.has(session.id));
+  }
 
-    const subjectEntries = [];
-    for (const subject of exerciseSubjects) {
-      const lockedId = registrationState.locked[subject.id];
-      let options;
-
+  function planIsFeasible(plan, extraBlockedId = null) {
+    for (const subjectId of raw.subjects) {
+      const coord = plan.bySubject[subjectId];
+      const lockedId = registrationState.locked[subjectId];
       if (lockedId) {
-        const lockedSession = sessionById.get(lockedId);
-        if (!lockedSession || blocked.has(lockedId)) return null;
-        options = [lockedSession];
-      } else {
-        options = subject.sessions
-          .filter((session) => session.type === "C" && !blocked.has(session.id))
-          .map((session) => ({ ...session, subjectId: subject.id }))
-          .filter((session) => !anchorSlots.has(slotKey(session)));
-      }
-
-      if (!options.length) return null;
-      options.sort((a, b) => localSessionCost(subject.id, a) - localSessionCost(subject.id, b));
-      subjectEntries.push({ subject, options });
-    }
-
-    subjectEntries.sort((a, b) => a.options.length - b.options.length);
-
-    const minSuffix = new Array(subjectEntries.length + 1).fill(0);
-    for (let index = subjectEntries.length - 1; index >= 0; index -= 1) {
-      const entry = subjectEntries[index];
-      const minLocal = Math.min(...entry.options.map((session) => localSessionCost(entry.subject.id, session)));
-      minSuffix[index] = minSuffix[index + 1] + minLocal;
-    }
-
-    let best = null;
-    let bestScore = Number.POSITIVE_INFINITY;
-    let nodes = 0;
-    const NODE_LIMIT = 180000;
-    const chosen = [];
-    const occupied = new Set(anchorSlots);
-
-    function visit(index, localCost) {
-      if (nodes >= NODE_LIMIT) return;
-      nodes += 1;
-
-      if (localCost + minSuffix[index] > bestScore + 1e-9) return;
-
-      if (index >= subjectEntries.length) {
-        if (hasConflicts(chosen)) return;
-        const score = localCost + globalSchedulePenalty(chosen);
-        if (score < bestScore) {
-          bestScore = score;
-          best = [...chosen];
-        }
-        return;
-      }
-
-      const entry = subjectEntries[index];
-      for (const session of entry.options) {
-        const key = slotKey(session);
-        if (occupied.has(key)) continue;
-
-        const nextLocal = localCost + localSessionCost(entry.subject.id, session);
-        if (nextLocal + minSuffix[index + 1] > bestScore + 1e-9) continue;
-
-        occupied.add(key);
-        chosen.push(session);
-        visit(index + 1, nextLocal);
-        chosen.pop();
-        occupied.delete(key);
+        const locked = sessionById.get(lockedId);
+        if (!locked || locked.day !== coord.day || locked.slot !== coord.slot) return false;
+      } else if (!availableSessions(subjectId, coord, extraBlockedId).length) {
+        return false;
       }
     }
+    return true;
+  }
 
-    visit(0, 0);
-    if (!best) return null;
+  function approvedPlans() {
+    const approved = approvedPlanIds();
+    return plans.filter((plan) => approved.has(plan.id));
+  }
 
-    const bySubject = {};
-    for (const session of best) bySubject[session.subjectId] = session;
-    return { sessions: best, bySubject, score: bestScore, limited: nodes >= NODE_LIMIT };
+  function remainingPlans(extraBlockedId = null) {
+    return approvedPlans().filter((plan) => planIsFeasible(plan, extraBlockedId));
+  }
+
+  function preferredSession(subjectId, coord, blockedId = null) {
+    const available = availableSessions(subjectId, coord, blockedId);
+    if (!available.length) return null;
+    const preferred = preferredExerciseBySubject.get(subjectId);
+    if (preferred && preferred.day === coord.day && preferred.slot === coord.slot) {
+      const exact = available.find((session) => session.id === preferred.id);
+      if (exact) return exact;
+    }
+    return available[0];
   }
 
   function changedSubjects(planA, planB) {
     if (!planA || !planB) return [];
-    return exerciseSubjects.filter((subject) => {
-      const a = planA.bySubject[subject.id];
-      const b = planB.bySubject[subject.id];
-      return a?.id !== b?.id;
-    });
+    return raw.subjects.filter((subjectId) => !sameCoord(planA.bySubject[subjectId], planB.bySubject[subjectId]));
   }
 
-  function impactText(bestPlan, alternativePlan, session) {
-    if (!alternativePlan) return "Bez tohto termínu už nezostáva žiadna platná kombinácia cvičení.";
-
-    const changes = changedSubjects(bestPlan, alternativePlan);
-    const thursday = alternativePlan.sessions.some((event) => event.day === 3);
-    const friday = alternativePlan.sessions.some((event) => event.day === 4);
-    const alternatives = changes
-      .filter((subject) => subject.id !== session.subjectId)
-      .map((subject) => subject.short);
-
-    const bits = [];
-    if (alternatives.length) bits.push(`musel by sa zmeniť aj ${alternatives.join(", ")}`);
-    if (thursday) bits.push("objavila by sa škola vo štvrtok");
-    if (friday) bits.push("objavila by sa škola v piatok");
-    if (!bits.length) {
-      const alt = alternativePlan.bySubject[session.subjectId];
-      if (alt && alt.day === session.day && alt.slot === session.slot) {
-        bits.push("existuje iná skupina v úplne rovnakom čase");
-      } else {
-        bits.push("náhrada mení iba tento predmet alebo mierne posúva čas v škole");
-      }
-    }
-    return bits.join("; ") + ".";
-  }
-
-  function buildPriorities(bestPlan) {
-    if (!bestPlan) return [];
+  function buildPriorities(remaining) {
+    if (!remaining.length) return [];
+    const best = remaining[0];
     const priorities = [];
 
-    for (const subject of exerciseSubjects) {
-      if (registrationState.locked[subject.id]) continue;
-      const session = bestPlan.bySubject[subject.id];
+    for (const subjectId of raw.subjects) {
+      if (registrationState.locked[subjectId]) continue;
+      const subject = subjectById.get(subjectId);
+      const coord = best.bySubject[subjectId];
+      const available = availableSessions(subjectId, coord);
+      const session = preferredSession(subjectId, coord);
       if (!session) continue;
 
-      const alternative = findBestPlan(session.id);
-      const regret = alternative ? alternative.score - bestPlan.score : Number.POSITIVE_INFINITY;
-      const changes = alternative ? changedSubjects(bestPlan, alternative).length : 99;
-      priorities.push({ subject, session, alternative, regret, changes });
+      const sameTimeAlternatives = Math.max(0, available.length - 1);
+      let afterNo;
+      if (sameTimeAlternatives > 0) {
+        afterNo = remaining;
+      } else {
+        afterNo = remaining.filter((plan) => {
+          const other = plan.bySubject[subjectId];
+          return !sameCoord(other, coord);
+        });
+      }
+
+      const afterYes = remaining.filter((plan) => sameCoord(plan.bySubject[subjectId], coord));
+      const lossOnNo = remaining.length - afterNo.length;
+      const fallback = afterNo[0] || null;
+      const changes = fallback ? changedSubjects(best, fallback).length : 99;
+
+      priorities.push({
+        subject,
+        subjectId,
+        coord,
+        session,
+        available,
+        sameTimeAlternatives,
+        afterNo,
+        afterYes,
+        lossOnNo,
+        fallback,
+        changes,
+        total: remaining.length
+      });
     }
 
     priorities.sort((a, b) => {
-      if (!Number.isFinite(a.regret) && Number.isFinite(b.regret)) return -1;
-      if (Number.isFinite(a.regret) && !Number.isFinite(b.regret)) return 1;
-      if (b.regret !== a.regret) return b.regret - a.regret;
+      if (b.lossOnNo !== a.lossOnNo) return b.lossOnNo - a.lossOnNo;
+      if (a.sameTimeAlternatives !== b.sameTimeAlternatives) return a.sameTimeAlternatives - b.sameTimeAlternatives;
       if (b.changes !== a.changes) return b.changes - a.changes;
       return a.subject.name.localeCompare(b.subject.name);
     });
@@ -310,9 +197,11 @@
   }
 
   function impactLevel(item) {
-    if (!Number.isFinite(item.regret) || item.regret >= 40 || item.changes >= 3) return ["Kritické", "critical"];
-    if (item.regret >= 20 || item.changes >= 2) return ["Dôležité", "important"];
-    if (item.regret >= 5) return ["Stredné", "medium"];
+    if (item.afterNo.length === 0) return ["Kritické", "critical"];
+    const ratio = item.lossOnNo / Math.max(1, item.total);
+    if (ratio >= 0.65 || item.changes >= 3) return ["Kritické", "critical"];
+    if (ratio >= 0.35 || item.changes >= 2) return ["Dôležité", "important"];
+    if (ratio >= 0.15) return ["Stredné", "medium"];
     return ["Nízke", "low"];
   }
 
@@ -320,27 +209,51 @@
     return `${data.days[session.day]} · ${data.slots[session.slot]} · ${session.group}`;
   }
 
-  function renderCurrent(bestPlan, priorities) {
+  function impactText(item) {
+    if (item.sameTimeAlternatives > 0) {
+      return `Ak ${item.session.group} nevyjde, v rovnakom čase ostáva ešte ${item.sameTimeAlternatives} ${item.sameTimeAlternatives === 1 ? "skupina" : "skupiny"}; žiadny schválený layout tým zatiaľ nestratíš.`;
+    }
+    if (!item.afterNo.length) {
+      return "Ak tento termín nevyjde, z aktuálne možných schválených rozvrhov nezostane ani jeden.";
+    }
+    const changed = changedSubjects(item.afterYes[0] || null, item.fallback)
+      .filter((subjectId) => subjectId !== item.subjectId)
+      .map((subjectId) => subjectById.get(subjectId)?.short || subjectId);
+    const extra = changed.length ? ` Najlepší fallback ${item.fallback.id} mení aj: ${changed.join(", ")}.` : ` Najlepší fallback je ${item.fallback.id}.`;
+    return `Po NIE zostane ${item.afterNo.length} z ${item.total} aktuálne možných schválených rozvrhov.${extra}`;
+  }
+
+  function renderCurrent(approved, remaining, priorities) {
     const done = Object.keys(registrationState.locked).length;
-    if (!bestPlan) {
-      els.current.innerHTML = `
-        <div class="registration-empty bad-state">
-          <p class="eyebrow">Nie je platný plán</p>
-          <h2>Aktuálne odpovede už neumožňujú zostaviť rozvrh bez kolízií.</h2>
-          <p>Vráť posledný krok a vyber inú možnosť.</p>
-        </div>`;
+
+    if (!approved.length) {
+      els.current.innerHTML = `<div class="registration-empty bad-state">
+        <p class="eyebrow">Najprv schváľ fallbacky</p>
+        <h2>Zatiaľ nemáš schválený ani jeden pevný rozvrh.</h2>
+        <p>Prejdi do „Schváliť rozvrhy“ a označ tie, ktoré by si bol ochotný používať. LIVE potom bude pracovať výhradne s nimi.</p>
+      </div>`;
+      els.yes.disabled = true;
+      els.no.disabled = true;
+      return;
+    }
+
+    if (!remaining.length) {
+      els.current.innerHTML = `<div class="registration-empty bad-state">
+        <p class="eyebrow">Došli schválené fallbacky</p>
+        <h2>Aktuálne ÁNO/NIE už nezodpovedajú žiadnemu rozvrhu, ktorý si schválil.</h2>
+        <p>Vráť posledný krok alebo schváľ ďalšie fallback rozvrhy.</p>
+      </div>`;
       els.yes.disabled = true;
       els.no.disabled = true;
       return;
     }
 
     if (!priorities.length) {
-      els.current.innerHTML = `
-        <div class="registration-empty success-state">
-          <p class="eyebrow">Cvičenia hotové</p>
-          <h2>Všetkých ${done} cvičení je zamknutých.</h2>
-          <p>Teraz môžeš v pokoji zapísať prednášky. Aktuálny finálny plán je zobrazený nižšie.</p>
-        </div>`;
+      els.current.innerHTML = `<div class="registration-empty success-state">
+        <p class="eyebrow">Cvičenia hotové</p>
+        <h2>Všetkých ${done} cvičení je potvrdených.</h2>
+        <p>Finálny rozvrh zodpovedá schválenému layoutu ${escapeHtml(remaining[0].id)}. Teraz môžeš riešiť prednášky.</p>
+      </div>`;
       els.yes.disabled = true;
       els.no.disabled = true;
       return;
@@ -348,18 +261,17 @@
 
     const item = priorities[0];
     const [label, cls] = impactLevel(item);
-    els.current.innerHTML = `
-      <div class="registration-now">
-        <div class="registration-now-top">
-          <div>
-            <p class="eyebrow">Teraz klikni</p>
-            <h2>${escapeHtml(item.subject.name)}</h2>
-          </div>
-          <span class="impact-badge ${cls}">${label}</span>
+    els.current.innerHTML = `<div class="registration-now">
+      <div class="registration-now-top">
+        <div>
+          <p class="eyebrow">Teraz klikni · cieľový layout ${escapeHtml(remaining[0].id)}</p>
+          <h2>${escapeHtml(item.subject.name)}</h2>
         </div>
-        <div class="registration-time">${escapeHtml(formatSession(item.session))}</div>
-        <p class="registration-reason"><strong>Ak nevýjde:</strong> ${escapeHtml(impactText(bestPlan, item.alternative, item.session))}</p>
-      </div>`;
+        <span class="impact-badge ${cls}">${label}</span>
+      </div>
+      <div class="registration-time">${escapeHtml(formatSession(item.session))}</div>
+      <p class="registration-reason"><strong>Ak nevýjde:</strong> ${escapeHtml(impactText(item))}</p>
+    </div>`;
     els.yes.disabled = false;
     els.no.disabled = false;
   }
@@ -372,63 +284,76 @@
 
     els.priority.innerHTML = priorities.map((item, index) => {
       const [label, cls] = impactLevel(item);
-      return `
-        <div class="priority-row${index === 0 ? " is-next" : ""}">
-          <span class="priority-number">${index + 1}</span>
-          <div class="priority-main">
-            <strong>${escapeHtml(item.subject.short)}</strong>
-            <span>${escapeHtml(formatSession(item.session))}</span>
-          </div>
-          <span class="impact-badge ${cls}">${label}</span>
-        </div>`;
+      return `<div class="priority-row${index === 0 ? " is-next" : ""}">
+        <span class="priority-number">${index + 1}</span>
+        <div class="priority-main">
+          <strong>${escapeHtml(item.subject.short)}</strong>
+          <span>${escapeHtml(formatSession(item.session))}</span>
+          <small>po NIE: ${item.afterNo.length}/${item.total} layoutov</small>
+        </div>
+        <span class="impact-badge ${cls}">${label}</span>
+      </div>`;
     }).join("");
   }
 
-  function renderProgress(bestPlan) {
+  function renderProgress(approved, remaining) {
     const lockedCount = Object.keys(registrationState.locked).length;
     const blockedCount = registrationState.blocked.length;
-    const percent = Math.round((lockedCount / exerciseSubjects.length) * 100);
+    const percent = Math.round((lockedCount / raw.subjects.length) * 100);
 
-    els.progress.innerHTML = `
-      <div class="progress-bar" aria-label="${percent} % cvičení zapísaných"><span style="width:${percent}%"></span></div>
+    els.progress.innerHTML = `<div class="progress-bar" aria-label="${percent} % cvičení zapísaných"><span style="width:${percent}%"></span></div>
       <div class="progress-stats">
-        <div><span>Zapísané</span><strong>${lockedCount}/${exerciseSubjects.length}</strong></div>
+        <div><span>Zapísané</span><strong>${lockedCount}/${raw.subjects.length}</strong></div>
+        <div><span>Schválené</span><strong>${approved.length}</strong></div>
+        <div><span>Stále možné</span><strong>${remaining.length}</strong></div>
         <div><span>Nevyšli</span><strong>${blockedCount}</strong></div>
-        <div><span>Štvrtok</span><strong>${bestPlan && !bestPlan.sessions.some((s) => s.day === 3) ? "voľno" : "škola"}</strong></div>
-        <div><span>Piatok</span><strong>${bestPlan && !bestPlan.sessions.some((s) => s.day === 4) ? "voľno" : "škola"}</strong></div>
       </div>`;
   }
 
-  function renderSchedule(bestPlan) {
-    if (!bestPlan) {
+  function displayExercise(plan, subjectId) {
+    const lockedId = registrationState.locked[subjectId];
+    if (lockedId) return sessionById.get(lockedId) || null;
+    const coord = plan.bySubject[subjectId];
+    const available = availableSessions(subjectId, coord);
+    if (!available.length) return null;
+    const preferred = preferredSession(subjectId, coord);
+    return {
+      ...preferred,
+      group: available.map((session) => session.group).join(" / ")
+    };
+  }
+
+  function renderSchedule(remaining) {
+    if (!remaining.length) {
       els.schedule.innerHTML = "";
       return;
     }
 
-    const events = [...lectureAnchors, ...bestPlan.sessions]
-      .sort((a, b) => a.day - b.day || a.slot - b.slot);
+    const plan = remaining[0];
+    const exercises = raw.subjects.map((subjectId) => displayExercise(plan, subjectId)).filter(Boolean);
+    const events = [...lectureAnchors, ...exercises].sort((a, b) => a.day - b.day || a.slot - b.slot);
     const byDay = new Map();
     for (const event of events) {
       if (!byDay.has(event.day)) byDay.set(event.day, []);
       byDay.get(event.day).push(event);
     }
 
-    let html = `<div class="registration-week">`;
+    let html = `<div class="registration-best-plan"><strong>${escapeHtml(plan.id)}</strong> · kategória ${escapeHtml(plan.tier)} · ${remaining.length} schválených layoutov stále možných</div>`;
+    html += `<div class="registration-week">`;
     data.days.forEach((day, dayIndex) => {
-      const dayEvents = byDay.get(dayIndex) || [];
+      const dayEvents = (byDay.get(dayIndex) || []).sort((a, b) => a.slot - b.slot);
       html += `<section class="registration-day"><h3>${escapeHtml(day)}</h3>`;
       if (!dayEvents.length) {
         html += `<p class="free-day">Voľno</p>`;
       } else {
         for (const event of dayEvents) {
           const subject = subjectById.get(event.subjectId);
-          const isLocked = event.type === "C" && registrationState.locked[event.subjectId] === event.id;
-          html += `
-            <div class="registration-event ${event.type === "P" ? "lecture" : "exercise"}${isLocked ? " locked" : ""}" style="--subject-color:${escapeHtml(subject?.color || "#94a3b8")}">
-              <span class="event-time">${escapeHtml(data.slots[event.slot])}</span>
-              <strong>${escapeHtml(subject?.short || "")}</strong>
-              <span>${escapeHtml(event.group)} · ${event.type === "P" ? "P" : isLocked ? "C ✓" : "C"}</span>
-            </div>`;
+          const isLocked = event.type === "C" && Boolean(registrationState.locked[event.subjectId]);
+          html += `<div class="registration-event ${event.type === "P" ? "lecture" : "exercise"}${isLocked ? " locked" : ""}" style="--subject-color:${escapeHtml(subject?.color || "#94a3b8")}">
+            <span class="event-time">${escapeHtml(data.slots[event.slot])}</span>
+            <strong>${escapeHtml(subject?.short || "")}</strong>
+            <span>${escapeHtml(event.group)} · ${event.type === "P" ? "P" : isLocked ? "C ✓" : "C"}</span>
+          </div>`;
         }
       }
       html += `</section>`;
@@ -456,15 +381,16 @@
   }
 
   function renderAll() {
-    const bestPlan = findBestPlan();
-    const priorities = buildPriorities(bestPlan);
-    renderCurrent(bestPlan, priorities);
+    const approved = approvedPlans();
+    const remaining = approved.filter((plan) => planIsFeasible(plan));
+    const priorities = buildPriorities(remaining);
+    renderCurrent(approved, remaining, priorities);
     renderPriority(priorities);
-    renderProgress(bestPlan);
-    renderSchedule(bestPlan);
+    renderProgress(approved, remaining);
+    renderSchedule(remaining);
     renderHistory();
     els.undo.disabled = undoStack.length === 0;
-    return { bestPlan, priorities };
+    return { approved, remaining, priorities };
   }
 
   function applyResult(result) {
@@ -473,30 +399,26 @@
     if (!current) return;
 
     undoStack.push(snapshot());
-    if (undoStack.length > 30) undoStack.shift();
+    if (undoStack.length > 40) undoStack.shift();
 
     if (result === "yes") {
-      registrationState.locked[current.subject.id] = current.session.id;
-    } else {
-      if (!registrationState.blocked.includes(current.session.id)) {
-        registrationState.blocked.push(current.session.id);
-      }
+      registrationState.locked[current.subjectId] = current.session.id;
+    } else if (!registrationState.blocked.includes(current.session.id)) {
+      registrationState.blocked.push(current.session.id);
     }
 
-    registrationState.history.push({
-      result,
-      sessionId: current.session.id,
-      at: Date.now()
-    });
+    registrationState.history.push({ result, sessionId: current.session.id, at: Date.now() });
     saveRegistrationState();
     renderAll();
   }
 
   function showRegistration() {
     document.querySelectorAll(".tab").forEach((button) => button.classList.remove("is-active"));
+    document.getElementById("planReviewTab")?.classList.remove("is-active");
     tab.classList.add("is-active");
     document.getElementById("subjectsView").hidden = true;
     document.getElementById("templatesView").hidden = true;
+    document.getElementById("planReviewView").hidden = true;
     view.hidden = false;
     renderAll();
   }
@@ -508,6 +430,11 @@
       tab.classList.remove("is-active");
       view.hidden = true;
     });
+  });
+
+  document.getElementById("planReviewTab")?.addEventListener("click", () => {
+    tab.classList.remove("is-active");
+    view.hidden = true;
   });
 
   els.yes.addEventListener("click", () => applyResult("yes"));
@@ -522,11 +449,14 @@
   });
 
   els.reset.addEventListener("click", () => {
-    if (!window.confirm("Naozaj vymazať celý priebeh zápisu a začať odznova?")) return;
-    undoStack.push(snapshot());
     registrationState = defaultRegistrationState();
+    undoStack.length = 0;
     saveRegistrationState();
     renderAll();
+  });
+
+  window.addEventListener("rozvrh-plan-review-changed", () => {
+    if (!view.hidden) renderAll();
   });
 
   renderAll();
