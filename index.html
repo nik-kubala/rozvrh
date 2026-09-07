@@ -8,10 +8,10 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Rozvrh VŠB-TUO</title>
-  <link rel="stylesheet" href="styles.css?v=20260907-1932">
-  <link rel="stylesheet" href="registration.css?v=20260907-1932">
-  <link rel="stylesheet" href="plan-review.css?v=20260907-1932">
-  <link rel="stylesheet" href="time-grid.css?v=20260907-1932">
+  <link rel="stylesheet" href="styles.css?v=20260907-1940">
+  <link rel="stylesheet" href="registration.css?v=20260907-1940">
+  <link rel="stylesheet" href="plan-review.css?v=20260907-1940">
+  <link rel="stylesheet" href="time-grid.css?v=20260907-1940">
 </head>
 <body>
   <header class="site-header">
@@ -82,8 +82,8 @@
       <div class="review-intro">
         <div>
           <p class="eyebrow">Pevná databáza fallbackov</p>
-          <h2>Ohodnoť každý rozvrh 1 / 2 / 3</h2>
-          <p><strong>1</strong> = veľmi dobrý, chcem ho preferovať. <strong>2</strong> = stále prijateľný fallback. <strong>3</strong> = zlý, LIVE ho nesmie použiť. Výber sa automaticky uloží po každom kliknutí.</p>
+          <h2>Ohodnoť každý rozvrh 1 / 2 / 3 / 4 / 5</h2>
+          <p><strong>1</strong> = top, presne takýto chcem. <strong>2</strong> = veľmi dobrý. <strong>3</strong> = normálne OK. <strong>4</strong> = iba ako núdzový fallback. <strong>5</strong> = nechcem vôbec. Takto z exportu oveľa presnejšie pochopím, aký typ rozvrhu preferuješ.</p>
         </div>
         <div class="review-tools">
           <button id="planReviewExport" class="secondary-action" type="button">↓ Export JSON</button>
@@ -108,9 +108,11 @@
           <select id="planReviewStatusFilter">
             <option value="all">Všetky</option>
             <option value="unreviewed">Neohodnotené</option>
-            <option value="1">1 — veľmi dobré</option>
-            <option value="2">2 — prijateľné fallbacky</option>
-            <option value="3">3 — nechcem</option>
+            <option value="1">1 — top</option>
+            <option value="2">2 — veľmi dobré</option>
+            <option value="3">3 — OK</option>
+            <option value="4">4 — iba núdzovo</option>
+            <option value="5">5 — nechcem</option>
           </select>
         </div>
       </div>
@@ -128,9 +130,11 @@
 
       <div class="review-actions">
         <button id="planReviewPrev" class="review-nav" type="button" aria-label="Predchádzajúci rozvrh">←</button>
-        <button id="planReviewRating1" class="review-decision rating-one" type="button">1 · VEĽMI DOBRÝ</button>
-        <button id="planReviewRating2" class="review-decision rating-two" type="button">2 · EŠTE OK</button>
-        <button id="planReviewRating3" class="review-decision rating-three" type="button">3 · ZLÝ</button>
+        <button id="planReviewRating1" class="review-decision rating-one" type="button">1 · TOP</button>
+        <button id="planReviewRating2" class="review-decision rating-two" type="button">2 · VEĽMI DOBRÝ</button>
+        <button id="planReviewRating3" class="review-decision rating-three" type="button">3 · OK</button>
+        <button id="planReviewRating4" class="review-decision rating-four" type="button">4 · NÚDZOVO</button>
+        <button id="planReviewRating5" class="review-decision rating-five" type="button">5 · NECHCEM</button>
         <button id="planReviewNext" class="review-nav" type="button" aria-label="Nasledujúci rozvrh">→</button>
       </div>
     </section>
@@ -139,8 +143,8 @@
       <div class="registration-intro">
         <div>
           <p class="eyebrow">Adaptívny zápis z tebou ohodnotených fallbackov</p>
-          <h2>LIVE používa iba rozvrhy s hodnotením 1 alebo 2</h2>
-          <p>Rozvrhy s hodnotením 1 sa preferujú pred dvojkami. Trojky sú úplne zakázané. Po každom ÁNO/NIE sa vyradia nekompatibilné layouty a stránka vyberie ďalšie najkritickejšie cvičenie.</p>
+          <h2>LIVE používa rozvrhy 1 až 4 a vždy preferuje nižšie hodnotenie</h2>
+          <p>Jednotky sú prvá voľba, potom 2, 3 a až nakoniec núdzové 4. Rozvrhy s hodnotením 5 sú úplne zakázané. Po každom ÁNO/NIE sa vyradia nekompatibilné layouty a stránka vyberie ďalšie najkritickejšie cvičenie.</p>
         </div>
         <div class="registration-tools">
           <button id="registrationUndo" class="secondary-action" type="button">↶ Späť</button>
@@ -172,7 +176,7 @@
         <div class="schedule-panel-head">
           <div>
             <h3>Najlepší stále možný schválený rozvrh</h3>
-            <p class="panel-help">✓ = už potvrdené. Ostatné bloky sú z najlepšieho fallbacku s hodnotením 1 alebo 2, ktorý ešte zostáva možný.</p>
+            <p class="panel-help">✓ = už potvrdené. Ostatné bloky sú z najlepšie hodnoteného fallbacku 1–4, ktorý ešte zostáva možný.</p>
           </div>
         </div>
         <div id="registrationSchedule"></div>
@@ -184,13 +188,13 @@
     Dáta sú prepísané zo screenshotov VŠB-TUO z 7. 9. 2026. Rozsah výuky sa interpretuje ako prednáška + cvičenie.
   </footer>
 
-  <script src="data.js?v=20260907-1932"></script>
-  <script src="fixes.js?v=20260907-1932"></script>
-  <script src="fixed-plans.js?v=20260907-1932"></script>
-  <script src="fixed-plan-utils.js?v=20260907-1932"></script>
-  <script src="app.js?v=20260907-1932"></script>
-  <script src="plan-review.js?v=20260907-1932"></script>
-  <script src="registration.js?v=20260907-1932"></script>
-  <script src="time-grid.js?v=20260907-1932"></script>
+  <script src="data.js?v=20260907-1940"></script>
+  <script src="fixes.js?v=20260907-1940"></script>
+  <script src="fixed-plans.js?v=20260907-1940"></script>
+  <script src="fixed-plan-utils.js?v=20260907-1940"></script>
+  <script src="app.js?v=20260907-1940"></script>
+  <script src="plan-review.js?v=20260907-1940"></script>
+  <script src="registration.js?v=20260907-1940"></script>
+  <script src="time-grid.js?v=20260907-1940"></script>
 </body>
 </html>
