@@ -7,13 +7,14 @@
   <title>Rozvrh VŠB-TUO</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="registration.css">
+  <link rel="stylesheet" href="plan-review.css">
 </head>
 <body>
   <header class="site-header">
     <div>
       <p class="eyebrow">VŠB-TUO · Zimný semester 2026/27</p>
       <h1>Rozvrh</h1>
-      <p class="subtitle">Termíny predmetov, šablóny a pomocník pri zápise na jednom mieste.</p>
+      <p class="subtitle">Termíny predmetov, pevné fallback rozvrhy a pomocník pri zápise na jednom mieste.</p>
     </div>
     <div class="status-pill">15 min buffer medzi blokmi</div>
   </header>
@@ -22,6 +23,7 @@
     <nav class="tabs" aria-label="Hlavná navigácia">
       <button class="tab is-active" type="button" data-view="subjects">Termíny predmetov</button>
       <button class="tab" type="button" data-view="templates">Šablóny rozvrhu</button>
+      <button id="planReviewTab" class="plan-review-tab" type="button">Schváliť rozvrhy</button>
       <button id="registrationTab" class="registration-tab" type="button">Zápis LIVE</button>
     </nav>
 
@@ -72,16 +74,66 @@
       <div id="templateSchedule"></div>
     </section>
 
+    <section id="planReviewView" class="view" hidden>
+      <div class="review-intro">
+        <div>
+          <p class="eyebrow">Pevná databáza fallbackov</p>
+          <h2>Najprv si schváľ rozvrhy, ktoré by si bol ochotný reálne používať</h2>
+          <p>Je tu 100 pevných, nekolidujúcich layoutov. A = iba Po–St, B = núdzovo aj štvrtok, C = núdzovo aj piatok. Skupiny v úplne rovnakom čase sú zlúčené do jedného layoutu.</p>
+        </div>
+        <button id="planReviewReset" class="secondary-action danger" type="button">Reset hodnotení</button>
+      </div>
+
+      <div class="review-filters">
+        <div class="toolbar-block">
+          <label class="label" for="planReviewTierFilter">Kategória</label>
+          <select id="planReviewTierFilter">
+            <option value="all">Všetky A + B + C</option>
+            <option value="A">A — štvrtok aj piatok voľno</option>
+            <option value="B">B — štvrtok použitý</option>
+            <option value="C">C — piatok použitý</option>
+          </select>
+        </div>
+        <div class="toolbar-block">
+          <label class="label" for="planReviewStatusFilter">Stav</label>
+          <select id="planReviewStatusFilter">
+            <option value="all">Všetky</option>
+            <option value="unreviewed">Neposúdené</option>
+            <option value="approved">Schválené</option>
+            <option value="rejected">Zamietnuté</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="review-progress-panel">
+        <div id="planReviewProgress"></div>
+      </div>
+
+      <div class="review-card">
+        <div id="planReviewCurrent" aria-live="polite"></div>
+        <div id="planReviewStats" class="stats-grid"></div>
+        <div id="planReviewSchedule"></div>
+        <p class="review-note">Pri cvičení s viacerými C/xx v jednom bloku stačí, aby bol voľný ktorýkoľvek z uvedených termínov — denný rozvrh ostáva rovnaký.</p>
+      </div>
+
+      <div class="review-actions">
+        <button id="planReviewPrev" class="review-nav" type="button" aria-label="Predchádzajúci rozvrh">←</button>
+        <button id="planReviewApprove" class="review-decision approve" type="button">✓ TENTO JE OK</button>
+        <button id="planReviewReject" class="review-decision reject" type="button">× TENTO NECHCEM</button>
+        <button id="planReviewNext" class="review-nav" type="button" aria-label="Nasledujúci rozvrh">→</button>
+      </div>
+    </section>
+
     <section id="registrationView" class="view" hidden>
       <div class="registration-intro">
         <div>
-          <p class="eyebrow">Adaptívny zápis</p>
-          <h2>Klikáš sám, stránka vždy vyberie ďalšie najkritickejšie cvičenie</h2>
-          <p>Po každom ÁNO/NIE sa celý najlepší zostávajúci rozvrh prepočíta. Prednášky sú zatiaľ iba pevné orientačné body a zapisujú sa až na konci.</p>
+          <p class="eyebrow">Adaptívny zápis zo schválených fallbackov</p>
+          <h2>Klikáš sám a LIVE používa iba rozvrhy, ktoré si vopred schválil</h2>
+          <p>Po každom ÁNO/NIE sa vyradia nekompatibilné schválené rozvrhy a stránka vyberie ďalšie najkritickejšie cvičenie. Už si nikdy nevymyslí nový rozvrh, ktorý si nevidel.</p>
         </div>
         <div class="registration-tools">
           <button id="registrationUndo" class="secondary-action" type="button">↶ Späť</button>
-          <button id="registrationReset" class="secondary-action danger" type="button">Reset</button>
+          <button id="registrationReset" class="secondary-action danger" type="button">Reset zápisu</button>
         </div>
       </div>
 
@@ -94,7 +146,7 @@
       <div class="registration-columns">
         <section class="registration-panel">
           <h3>Poradie ďalších klikov</h3>
-          <p class="panel-help">Poradie sa mení podľa toho, čo už máš a čo je plné.</p>
+          <p class="panel-help">Priorita sa počíta podľa toho, koľko tvojich schválených fallbackov by neúspech ohrozil.</p>
           <div id="registrationPriority"></div>
         </section>
         <section class="registration-panel">
@@ -108,8 +160,8 @@
       <section class="registration-panel schedule-panel">
         <div class="schedule-panel-head">
           <div>
-            <h3>Aktuálne najlepší možný rozvrh</h3>
-            <p class="panel-help">✓ = už potvrdené cvičenie. Neoznačené cvičenia sú zatiaľ plán, ktorý sa môže po NIE zmeniť.</p>
+            <h3>Najlepší stále možný schválený rozvrh</h3>
+            <p class="panel-help">✓ = už potvrdené. Ostatné bloky sú z najlepšieho schváleného fallbacku, ktorý ešte zostáva možný.</p>
           </div>
         </div>
         <div id="registrationSchedule"></div>
@@ -123,7 +175,10 @@
 
   <script src="data.js"></script>
   <script src="fixes.js"></script>
+  <script src="fixed-plans.js"></script>
+  <script src="fixed-plan-utils.js"></script>
   <script src="app.js"></script>
+  <script src="plan-review.js"></script>
   <script src="registration.js"></script>
 </body>
 </html>
