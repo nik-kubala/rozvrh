@@ -29,6 +29,15 @@
 
 .review-intro p:last-child { max-width: 860px; margin-bottom: 0; }
 
+.review-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  max-width: 430px;
+}
+
 .review-filters {
   display: grid;
   grid-template-columns: repeat(2, minmax(150px, 1fr));
@@ -62,16 +71,22 @@
   font-weight: 800;
 }
 
-.review-status.approved {
+.review-status.rating-1 {
   color: #bbf7d0;
-  border-color: rgba(34, 197, 94, .35);
-  background: var(--good-soft);
+  border-color: rgba(34, 197, 94, .42);
+  background: rgba(34, 197, 94, .14);
 }
 
-.review-status.rejected {
+.review-status.rating-2 {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, .42);
+  background: rgba(245, 158, 11, .13);
+}
+
+.review-status.rating-3 {
   color: #fecaca;
-  border-color: rgba(239, 68, 68, .35);
-  background: var(--bad-soft);
+  border-color: rgba(239, 68, 68, .4);
+  background: rgba(239, 68, 68, .13);
 }
 
 .review-status.unreviewed {
@@ -81,33 +96,39 @@
 
 .review-actions {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) minmax(0, 1fr) 54px;
+  grid-template-columns: 54px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 54px;
   gap: 10px;
   margin: 14px 0;
 }
 
 .review-decision {
-  min-height: 52px;
+  min-height: 54px;
   border-radius: 12px;
   border: 1px solid var(--border);
   font-weight: 850;
   color: var(--text);
 }
 
-.review-decision.approve {
-  border-color: rgba(34, 197, 94, .38);
-  background: rgba(34, 197, 94, .14);
+.review-decision.rating-one {
+  border-color: rgba(34, 197, 94, .42);
+  background: rgba(34, 197, 94, .15);
   color: #dcfce7;
 }
 
-.review-decision.reject {
-  border-color: rgba(239, 68, 68, .38);
+.review-decision.rating-two {
+  border-color: rgba(245, 158, 11, .42);
+  background: rgba(245, 158, 11, .14);
+  color: #fef3c7;
+}
+
+.review-decision.rating-three {
+  border-color: rgba(239, 68, 68, .4);
   background: rgba(239, 68, 68, .14);
   color: #fee2e2;
 }
 
 .review-nav {
-  min-height: 52px;
+  min-height: 54px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: #0f172a;
@@ -129,7 +150,7 @@
 
 .review-counts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -141,6 +162,21 @@
   background: rgba(255,255,255,.018);
 }
 
+.review-counts > .count-1 {
+  border-color: rgba(34, 197, 94, .25);
+  background: rgba(34, 197, 94, .07);
+}
+
+.review-counts > .count-2 {
+  border-color: rgba(245, 158, 11, .25);
+  background: rgba(245, 158, 11, .07);
+}
+
+.review-counts > .count-3 {
+  border-color: rgba(239, 68, 68, .25);
+  background: rgba(239, 68, 68, .07);
+}
+
 .review-counts span {
   display: block;
   color: var(--muted);
@@ -149,6 +185,12 @@
 }
 
 .review-counts strong { font-size: .98rem; }
+
+.review-save-note {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
 
 .review-empty {
   border: 1px dashed var(--border);
@@ -169,6 +211,13 @@
   font-size: .82rem;
 }
 
+@media (max-width: 980px) {
+  .review-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .review-actions {
+    grid-template-columns: 48px repeat(3, minmax(0, 1fr)) 48px;
+  }
+}
+
 @media (max-width: 780px) {
   .tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -182,16 +231,41 @@
     flex-direction: column;
   }
 
-  .review-filters { grid-template-columns: 1fr; }
-  .review-actions { grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1fr) 46px; }
-  .review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 520px) {
-  .review-actions {
-    grid-template-columns: 1fr 1fr;
+  .review-tools {
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
   }
 
-  .review-nav { order: 2; }
-  .review-decision { min-height: 58px; }
+  .review-filters { grid-template-columns: 1fr; }
+  .review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .review-actions {
+    grid-template-columns: 46px repeat(3, minmax(0, 1fr)) 46px;
+  }
+}
+
+@media (max-width: 620px) {
+  .review-actions {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .review-nav {
+    order: 2;
+  }
+
+  .review-decision {
+    min-height: 62px;
+    font-size: .86rem;
+  }
+
+  #planReviewPrev { grid-column: 1 / 2; }
+  #planReviewNext { grid-column: 3 / 4; }
+}
+
+@media (max-width: 420px) {
+  .review-tools .secondary-action {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .review-counts { grid-template-columns: 1fr 1fr; }
 }
