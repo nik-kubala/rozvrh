@@ -12,6 +12,13 @@ window.ROZVRH_PREFERENCES = {
     logic: 30,
     english: 20
   },
+  lectureRequirements: [
+    { key: "lecture:logic", subjectId: "logic", alternatives: ["logic-p01"] },
+    { key: "lecture:algebra", subjectId: "algebra", alternatives: ["algebra-p01"] },
+    { key: "lecture:programming:p01", subjectId: "programming", alternatives: ["programming-p01"] },
+    { key: "lecture:programming:p02", subjectId: "programming", alternatives: ["programming-p02"] },
+    { key: "lecture:digital", subjectId: "digital", alternatives: ["digital-p02", "digital-p01"] }
+  ],
   slotPenalty: [8, 0, 2, 7, 18, 32, 48],
   thursdaySlotPenalty: [0, 8, 18, 35, 60, 95, 140],
   rules: {
@@ -21,6 +28,8 @@ window.ROZVRH_PREFERENCES = {
     extraSchoolDayPenalty: 160,
     gapPenalty: 12,
     robustnessAveragePenalty: 260,
-    robustnessWeakLinkPenalty: 520
+    robustnessWeakLinkPenalty: 520,
+    concurrencyLimit: 2,
+    batchMinimumMassRatio: 0.02
   }
 };

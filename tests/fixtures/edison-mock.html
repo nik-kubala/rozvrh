@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <title>EDISON Assistant integration fixture</title>
+</head>
+<body>
+  <h1>Volba rozvrhu — test fixture</h1>
+  <table id="ns_TEST_:subjectsTable">
+    <tr><td><a onclick="return selectStudyYearObligation(7860493)">Zvolit</a></td><td>A/I-FEI</td><td><abbr title="Číslo předmětu 712-0124/01">Angličtina</abbr></td></tr>
+    <tr><td><a onclick="return selectStudyYearObligation(7860490)">Zvolit</a></td><td>LA</td><td><abbr title="Číslo předmětu 470-2205/01">Lineární algebra</abbr></td></tr>
+    <tr><td><a onclick="return selectStudyYearObligation(7860499)">Zvolit</a></td><td>PvICT</td><td><abbr title="Číslo předmětu 711-0439/01">Právo</abbr></td></tr>
+    <tr><td><a onclick="return selectStudyYearObligation(7860492)">Zvolit</a></td><td>ULM</td><td><abbr title="Číslo předmětu 460-2051/03">Logika</abbr></td></tr>
+    <tr><td><a onclick="return selectStudyYearObligation(7860487)">Zvolit</a></td><td>UPR</td><td><abbr title="Číslo předmětu 460-2052/05">Programování</abbr></td></tr>
+    <tr><td><a onclick="return selectStudyYearObligation(7860483)">Zvolit</a></td><td>ZDS</td><td><abbr title="Číslo předmětu 440-2104/01">Digitální systémy</abbr></td></tr>
+    <tr><td><a onclick="return selectStudyYearObligation(7860488)">Zvolit</a></td><td>ZIT</td><td><abbr title="Číslo předmětu 460-2079/01">Informační technologie</abbr></td></tr>
+  </table>
+  <script>
+    window.__selectCalls = 0;
+    document.documentElement.dataset.selectCalls = "0";
+    const obligationCodes = {
+      7860493: "712012401", 7860490: "470220501", 7860499: "711043901",
+      7860492: "460205103", 7860487: "460205205", 7860483: "440210401", 7860488: "460207901"
+    };
+    const czechDays = ["Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek"];
+    window.fetch = async (url) => {
+      const text = String(url);
+      let payload = { opened: false, subjectUsages: [], scheduleTable: { days: [] } };
+      const obligation = text.match(/selectStudyYearObligation\/(\d+)/)?.[1];
+      if (obligation) {
+        const code = obligationCodes[obligation];
+        const subject = window.ROZVRH_DATA.subjects.find((item) => item.code === code);
+        payload = {
+          subjectTitle: subject.name,
+          hasStudyPlan: true,
+          subjectScheduleTable: subject.sessions.map((session, index) => ({
+            concreteActivityId: Number(`${obligation}${String(index).padStart(2, "0")}`.slice(-9)),
+            concreteActivityCode: `${subject.code}${session.group}`,
+            subjectVersionScheduleCode: subject.code,
+            weekDayTitle: czechDays[session.day],
+            scheduleWindowBeginTime: `${window.ROZVRH_DATA.slots[session.slot].slice(0, 5)}:00`,
+            concreteActivityCapacity: session.type === "P" ? 300 : 25,
+            studentsCount: 0,
+            hasFreePlaces: true,
+            hasCollision: false,
+            selected: false,
+            lecture: session.type === "P",
+            practise: session.type === "C",
+            educationWeekTitle: session.week || null
+          }))
+        };
+      }
+      if (text.includes("selectConcreteActivity/")) {
+        window.__selectCalls += 1;
+        document.documentElement.dataset.selectCalls = String(window.__selectCalls);
+        payload = { errMsg: "Integration fixture must never register during DRY RUN." };
+      }
+      return { redirected: false, status: 200, headers: { get: () => "application/json" }, json: async () => payload };
+    };
+  </script>
+  <script src="../../edison-rozvrh-assistant.user.js"></script>
+</body>
+</html>

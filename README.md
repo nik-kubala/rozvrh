@@ -2,6 +2,8 @@
 
 Interaktívny prehliadač termínov a šablón rozvrhu pre VŠB-TUO, zimný semester 2026/27.
 
+Nový bezpečný EDISON userscript, DRY RUN, spoločné optimizer jadro a postup na deň zápisu sú v [README-AUTOMATION.md](README-AUTOMATION.md).
+
 ## Čo stránka vie
 
 - zobraziť všetky dostupné termíny konkrétneho predmetu,

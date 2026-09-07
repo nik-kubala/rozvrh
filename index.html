@@ -9,7 +9,7 @@
   <meta http-equiv="Expires" content="0">
   <title>Rozvrh VŠB-TUO</title>
   <link rel="stylesheet" href="styles.css?v=20260907-2205">
-  <link rel="stylesheet" href="registration.css?v=20260907-2205">
+  <link rel="stylesheet" href="registration.css?v=20260908-0100">
   <link rel="stylesheet" href="plan-review.css?v=20260907-2205">
   <link rel="stylesheet" href="time-grid.css?v=20260907-2205">
   <link rel="stylesheet" href="course-code.css?v=20260907-2205">
@@ -148,12 +148,15 @@
           <p>Preferencia je napevno vypočítaná z oboch tvojich kompletných hodnotení. 09:00 je ideál, 10:45 je stále veľmi dobré a 07:15 sa uprednostní pred poobednými blokmi. Silno sa drží Po–St; ak musí použiť štvrtok, tlačí ho čo najskôr ráno. Rozvrhy, ktoré dostali v oboch kolách 5, sú úplne zakázané. Pri každom kroku sa zároveň pozerá, koľko kvalitných fallbackov zostane po ÁNO aj po NIE, a vyššiu prioritu majú ZIT, algebra, programovanie a ďalšie rozvrhovo kritické predmety.</p>
         </div>
         <div class="registration-tools">
+          <button id="registrationImportLive" class="secondary-action" type="button">↑ Vložiť LIVE JSON</button>
+          <button id="registrationDryRun" class="secondary-action" type="button">DRY RUN</button>
           <button id="registrationUndo" class="secondary-action" type="button">↶ Späť</button>
           <button id="registrationReset" class="secondary-action danger" type="button">Reset zápisu</button>
         </div>
       </div>
 
       <div id="registrationCurrent" aria-live="polite"></div>
+      <div id="registrationDryRunOutput" aria-live="polite"></div>
       <div class="registration-actions">
         <button id="registrationYes" class="decision-btn yes" type="button">✓ ÁNO — zapísané</button>
         <button id="registrationNo" class="decision-btn no" type="button">× NIE — plné / nevyšlo</button>
@@ -193,10 +196,11 @@
   <script src="fixes.js?v=20260907-2205"></script>
   <script src="fixed-plans.js?v=20260907-2205"></script>
   <script src="fixed-plan-utils.js?v=20260907-2205"></script>
-  <script src="preferences.js?v=20260907-2205"></script>
+  <script src="preferences.js?v=20260908-0100"></script>
+  <script src="optimizer-core.js?v=20260908-0100"></script>
   <script src="app.js?v=20260907-2205"></script>
   <script src="plan-review.js?v=20260907-2205"></script>
-  <script src="registration.js?v=20260907-2205"></script>
+  <script src="registration.js?v=20260908-0100"></script>
   <script src="course-code.js?v=20260907-2205"></script>
   <script src="time-grid.js?v=20260907-2205"></script>
 </body>
