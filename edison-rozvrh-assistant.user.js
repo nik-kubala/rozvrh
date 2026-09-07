@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         EDISON Rozvrh Assistant
 // @namespace    https://github.com/nik-kubala/rozvrh
-// @version      1.0.0
-// @description  Bezpečný adaptívny zápis rozvrhu VŠB-TUO s DRY RUN, ARM/START/STOP a robustnými fallbackmi.
+// @version      2.0.0
+// @description  Jedným klikom spustí adaptívny zápis rozvrhu VŠB-TUO s robustnými fallbackmi a LIVE kapacitami.
 // @author       nik-kubala
 // @match        https://edison.sso.vsb.cz/wps/*
+// @updateURL    https://raw.githubusercontent.com/nik-kubala/rozvrh/main/edison-rozvrh-assistant.user.js
+// @downloadURL  https://raw.githubusercontent.com/nik-kubala/rozvrh/main/edison-rozvrh-assistant.user.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
