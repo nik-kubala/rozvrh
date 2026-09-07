@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Rozvrh VŠB-TUO</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">VŠB-TUO · Zimný semester 2026/27</p>
+      <h1>Rozvrh</h1>
+      <p class="subtitle">Termíny predmetov a šablóny rozvrhu na jednom mieste.</p>
+    </div>
+    <div class="status-pill">15 min buffer medzi blokmi</div>
+  </header>
+
+  <main class="page-shell">
+    <nav class="tabs" aria-label="Hlavná navigácia">
+      <button class="tab is-active" type="button" data-view="subjects">Termíny predmetov</button>
+      <button class="tab" type="button" data-view="templates">Šablóny rozvrhu</button>
+    </nav>
+
+    <section id="subjectsView" class="view">
+      <div class="toolbar">
+        <div class="toolbar-block grow">
+          <label class="label" for="subjectSelect">Predmet</label>
+          <select id="subjectSelect"></select>
+        </div>
+        <div class="toolbar-block">
+          <span class="label">Zobraziť</span>
+          <div class="segmented" role="group" aria-label="Filter typu výučby">
+            <button type="button" class="segmented-btn is-active" data-type-filter="all">Všetko</button>
+            <button type="button" class="segmented-btn" data-type-filter="P">Prednášky</button>
+            <button type="button" class="segmented-btn" data-type-filter="C">Cvičenia</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="subjectMeta" class="subject-meta"></div>
+      <div class="legend">
+        <span><i class="legend-dot lecture"></i> Prednáška</span>
+        <span><i class="legend-dot exercise"></i> Cvičenie</span>
+        <span><i class="legend-dot selected"></i> Vybraný termín</span>
+      </div>
+
+      <div id="subjectSchedule"></div>
+      <aside id="sessionDetail" class="detail-panel" aria-live="polite"></aside>
+    </section>
+
+    <section id="templatesView" class="view" hidden>
+      <div class="template-toolbar">
+        <button id="prevTemplate" type="button" class="nav-btn" aria-label="Predchádzajúca šablóna">←</button>
+        <div class="toolbar-block grow">
+          <label class="label" for="templateSelect">Šablóna</label>
+          <select id="templateSelect"></select>
+        </div>
+        <button id="nextTemplate" type="button" class="nav-btn" aria-label="Nasledujúca šablóna">→</button>
+      </div>
+
+      <div id="templateHeader" class="template-header"></div>
+      <div id="templateStats" class="stats-grid"></div>
+      <div id="templateWarnings"></div>
+      <div class="legend">
+        <span><i class="legend-dot lecture"></i> Prednáška</span>
+        <span><i class="legend-dot exercise"></i> Cvičenie</span>
+      </div>
+      <div id="templateSchedule"></div>
+    </section>
+  </main>
+
+  <footer>
+    Dáta sú prepísané zo screenshotov VŠB-TUO z 7. 9. 2026. Chýbajúci termín prednášky ZIT je v rozhraní označený.
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
