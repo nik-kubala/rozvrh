@@ -7,6 +7,7 @@
   const { data, plans, subjectById, planEvents, metrics } = utils;
   const STORAGE_KEY = "rozvrh-plan-review-v1";
   const BACKUP_KEY = "rozvrh-plan-review-backup-v2";
+  const SCALE_VERSION = 5;
 
   const tab = document.getElementById("planReviewTab");
   const view = document.getElementById("planReviewView");
@@ -20,6 +21,8 @@
     rating1: document.getElementById("planReviewRating1"),
     rating2: document.getElementById("planReviewRating2"),
     rating3: document.getElementById("planReviewRating3"),
+    rating4: document.getElementById("planReviewRating4"),
+    rating5: document.getElementById("planReviewRating5"),
     prev: document.getElementById("planReviewPrev"),
     next: document.getElementById("planReviewNext"),
     reset: document.getElementById("planReviewReset"),
@@ -30,8 +33,11 @@
     tierFilter: document.getElementById("planReviewTierFilter")
   };
 
+  const ratingButtons = [els.rating1, els.rating2, els.rating3, els.rating4, els.rating5].filter(Boolean);
+
   function defaultState() {
     return {
+      scaleVersion: SCALE_VERSION,
       decisions: {},
       ratings: {},
       currentId: plans[0]?.id || null,
@@ -41,33 +47,52 @@
     };
   }
 
+  function migrateOldRating(value) {
+    const rating = Number(value);
+    if (rating === 1) return 1;
+    if (rating === 2) return 3;
+    if (rating === 3) return 5;
+    return 0;
+  }
+
   function normalizeState(parsed) {
     const base = defaultState();
     if (!parsed || typeof parsed !== "object") return base;
 
-    const ratings = parsed.ratings && typeof parsed.ratings === "object" ? { ...parsed.ratings } : {};
+    const oldScale = parsed.scaleVersion !== SCALE_VERSION;
+    const incomingRatings = parsed.ratings && typeof parsed.ratings === "object" ? parsed.ratings : {};
     const decisions = parsed.decisions && typeof parsed.decisions === "object" ? { ...parsed.decisions } : {};
+    const ratings = {};
 
-    // Migrácia pôvodného dvojstavového hodnotenia.
     for (const plan of plans) {
-      const rawRating = Number(ratings[plan.id]);
-      if (rawRating >= 1 && rawRating <= 3) {
-        ratings[plan.id] = rawRating;
+      const rawRating = Number(incomingRatings[plan.id]);
+      const normalized = oldScale
+        ? migrateOldRating(rawRating)
+        : (rawRating >= 1 && rawRating <= 5 ? rawRating : 0);
+
+      if (normalized) {
+        ratings[plan.id] = normalized;
         continue;
       }
-      if (decisions[plan.id] === "approved") ratings[plan.id] = 1;
-      if (decisions[plan.id] === "rejected") ratings[plan.id] = 3;
+
+      if (decisions[plan.id] === "approved") ratings[plan.id] = 3;
+      if (decisions[plan.id] === "rejected") ratings[plan.id] = 5;
     }
 
-    const migratedFilter = ["1", "2", "3", "unreviewed", "all"].includes(parsed.statusFilter)
-      ? parsed.statusFilter
-      : "all";
+    const allowedFilters = ["1", "2", "3", "4", "5", "unreviewed", "all"];
+    let statusFilter = parsed.statusFilter || "all";
+    if (oldScale) {
+      if (statusFilter === "2") statusFilter = "3";
+      if (statusFilter === "3") statusFilter = "5";
+    }
+    if (!allowedFilters.includes(statusFilter)) statusFilter = "all";
 
     return {
+      scaleVersion: SCALE_VERSION,
       decisions,
       ratings,
       currentId: parsed.currentId || base.currentId,
-      statusFilter: migratedFilter,
+      statusFilter,
       tierFilter: ["A", "B", "C", "all"].includes(parsed.tierFilter) ? parsed.tierFilter : "all",
       lastSavedAt: parsed.lastSavedAt || null
     };
@@ -88,40 +113,39 @@
 
   let state = loadState();
 
-  // plan-review.js si ponechá pôvodné poradie na prezeranie. Pre LIVE vytvoríme
-  // samostatné pole, ktoré môže byť zoradené 1 -> 2 -> ostatné bez zmeny review poradia.
+  // Review ostáva v pôvodnom poradí. LIVE dostane vlastné pole zoradené
+  // podľa tvojho hodnotenia: 1 -> 2 -> 3 -> 4. Päťky sa nepoužívajú.
   const registrationPlans = [...plans];
   utils.plans = registrationPlans;
 
   function ratingFor(planOrId) {
     const id = typeof planOrId === "string" ? planOrId : planOrId?.id;
     const value = Number(state.ratings[id]);
-    return value >= 1 && value <= 3 ? value : 0;
+    return value >= 1 && value <= 5 ? value : 0;
   }
 
   function syncCompatibilityDecisions() {
     const decisions = {};
     for (const plan of plans) {
       const rating = ratingFor(plan);
-      if (rating === 1 || rating === 2) decisions[plan.id] = "approved";
-      if (rating === 3) decisions[plan.id] = "rejected";
+      if (rating >= 1 && rating <= 4) decisions[plan.id] = "approved";
+      if (rating === 5) decisions[plan.id] = "rejected";
     }
     state.decisions = decisions;
   }
 
   function syncRegistrationPlanOrder() {
     registrationPlans.sort((a, b) => {
-      const ar = ratingFor(a);
-      const br = ratingFor(b);
-      const rank = (rating) => rating === 1 ? 0 : rating === 2 ? 1 : 2;
-      const rankDiff = rank(ar) - rank(br);
-      if (rankDiff) return rankDiff;
+      const ar = ratingFor(a) || 99;
+      const br = ratingFor(b) || 99;
+      if (ar !== br) return ar - br;
       if (a.score !== b.score) return a.score - b.score;
       return a.id.localeCompare(b.id);
     });
   }
 
   function saveState() {
+    state.scaleVersion = SCALE_VERSION;
     syncCompatibilityDecisions();
     state.lastSavedAt = new Date().toISOString();
     const serialized = JSON.stringify(state);
@@ -171,10 +195,16 @@
   }
 
   function ratingLabel(rating) {
-    if (rating === 1) return "1 · výborný";
-    if (rating === 2) return "2 · prijateľný fallback";
-    if (rating === 3) return "3 · nechcem";
+    if (rating === 1) return "1 · top";
+    if (rating === 2) return "2 · veľmi dobrý";
+    if (rating === 3) return "3 · OK";
+    if (rating === 4) return "4 · iba núdzovo";
+    if (rating === 5) return "5 · nechcem";
     return "neohodnotený";
+  }
+
+  function setRatingButtonsDisabled(disabled) {
+    ratingButtons.forEach((button) => { button.disabled = disabled; });
   }
 
   function renderCurrent(plan, list) {
@@ -182,9 +212,7 @@
       els.current.innerHTML = `<div class="review-empty"><h2>Tomuto filtru nezodpovedá žiadny rozvrh.</h2><p>Zmeň filter hore.</p></div>`;
       els.schedule.innerHTML = "";
       els.stats.innerHTML = "";
-      els.rating1.disabled = true;
-      els.rating2.disabled = true;
-      els.rating3.disabled = true;
+      setRatingButtonsDisabled(true);
       return;
     }
 
@@ -220,9 +248,7 @@
       <div class="stat ${m.fridayFree ? "good" : "bad"}"><span>Piatok</span><strong>${m.fridayFree ? "voľno" : "škola"}</strong></div>`;
 
     renderSchedule(plan);
-    els.rating1.disabled = false;
-    els.rating2.disabled = false;
-    els.rating3.disabled = false;
+    setRatingButtonsDisabled(false);
   }
 
   function renderSchedule(plan) {
@@ -256,7 +282,7 @@
   }
 
   function counts() {
-    const result = { 1: 0, 2: 0, 3: 0, unreviewed: 0 };
+    const result = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, unreviewed: 0 };
     for (const plan of plans) {
       const rating = ratingFor(plan);
       if (rating) result[rating] += 1;
@@ -267,7 +293,7 @@
 
   function renderProgress() {
     const c = counts();
-    const reviewed = c[1] + c[2] + c[3];
+    const reviewed = c[1] + c[2] + c[3] + c[4] + c[5];
     const pct = Math.round((reviewed / plans.length) * 100);
     const saved = state.lastSavedAt
       ? new Date(state.lastSavedAt).toLocaleTimeString("sk-SK", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
@@ -275,9 +301,11 @@
 
     els.progress.innerHTML = `
       <div class="review-counts">
-        <div class="count-1"><span>1 · výborné</span><strong>${c[1]}</strong></div>
-        <div class="count-2"><span>2 · fallback</span><strong>${c[2]}</strong></div>
-        <div class="count-3"><span>3 · nechcem</span><strong>${c[3]}</strong></div>
+        <div class="count-1"><span>1 · top</span><strong>${c[1]}</strong></div>
+        <div class="count-2"><span>2 · veľmi dobré</span><strong>${c[2]}</strong></div>
+        <div class="count-3"><span>3 · OK</span><strong>${c[3]}</strong></div>
+        <div class="count-4"><span>4 · núdzovo</span><strong>${c[4]}</strong></div>
+        <div class="count-5"><span>5 · nechcem</span><strong>${c[5]}</strong></div>
         <div><span>Zostáva</span><strong>${c.unreviewed}</strong></div>
         <div><span>Hotovo</span><strong>${pct}%</strong></div>
       </div>
@@ -321,7 +349,7 @@
   function decide(rating) {
     const list = filteredPlans();
     const plan = currentPlan(list);
-    if (!plan) return;
+    if (!plan || rating < 1 || rating > 5) return;
     state.ratings[plan.id] = rating;
     const next = findNextUnreviewed(plan.id);
     if (next) state.currentId = next.id;
@@ -333,7 +361,9 @@
     saveState();
     const c = counts();
     const payload = {
-      format: "rozvrh-ratings-v1",
+      format: "rozvrh-ratings-v2",
+      scale: "1-best-5-worst",
+      scaleVersion: SCALE_VERSION,
       fixedPlansVersion: window.ROZVRH_FIXED_PLANS?.version ?? null,
       exportedAt: new Date().toISOString(),
       totalPlans: plans.length,
@@ -341,6 +371,8 @@
         rating1: c[1],
         rating2: c[2],
         rating3: c[3],
+        rating4: c[4],
+        rating5: c[5],
         unreviewed: c.unreviewed
       },
       ratings: { ...state.ratings },
@@ -368,20 +400,23 @@
       const incoming = parsed?.ratings;
       if (!incoming || typeof incoming !== "object") throw new Error("Súbor neobsahuje ratings.");
 
+      const isOldExport = parsed.format === "rozvrh-ratings-v1" || Number(parsed.scaleVersion) !== SCALE_VERSION;
       const validIds = new Set(plans.map((plan) => plan.id));
       const ratings = {};
       for (const [id, rawRating] of Object.entries(incoming)) {
-        const rating = Number(rawRating);
-        if (validIds.has(id) && rating >= 1 && rating <= 3) ratings[id] = rating;
+        if (!validIds.has(id)) continue;
+        const rating = isOldExport ? migrateOldRating(rawRating) : Number(rawRating);
+        if (rating >= 1 && rating <= 5) ratings[id] = rating;
       }
 
       if (!Object.keys(ratings).length) throw new Error("Nenašli sa žiadne platné hodnotenia.");
       if (!window.confirm(`Importovať ${Object.keys(ratings).length} hodnotení a nahradiť aktuálny výber?`)) return;
 
-      state.ratings = ratings;
-      state.currentId = plans.find((plan) => !ratingFor(plan))?.id || plans[0]?.id || null;
-      state.statusFilter = "all";
-      state.tierFilter = "all";
+      state = {
+        ...defaultState(),
+        ratings,
+        currentId: plans.find((plan) => !ratings[plan.id])?.id || plans[0]?.id || null
+      };
       saveState();
       render();
     } catch (error) {
@@ -414,9 +449,11 @@
     view.hidden = true;
   });
 
-  els.rating1.addEventListener("click", () => decide(1));
-  els.rating2.addEventListener("click", () => decide(2));
-  els.rating3.addEventListener("click", () => decide(3));
+  els.rating1?.addEventListener("click", () => decide(1));
+  els.rating2?.addEventListener("click", () => decide(2));
+  els.rating3?.addEventListener("click", () => decide(3));
+  els.rating4?.addEventListener("click", () => decide(4));
+  els.rating5?.addEventListener("click", () => decide(5));
   els.prev.addEventListener("click", () => move(-1));
   els.next.addEventListener("click", () => move(1));
   els.export.addEventListener("click", exportRatings);
@@ -440,7 +477,7 @@
   });
 
   els.reset.addEventListener("click", () => {
-    if (!window.confirm("Naozaj vymazať všetky hodnotenia 1/2/3? Pred resetom si môžeš spraviť export.")) return;
+    if (!window.confirm("Naozaj vymazať všetky hodnotenia 1/2/3/4/5? Pred resetom si môžeš spraviť export.")) return;
     state = defaultState();
     saveState();
     render();
