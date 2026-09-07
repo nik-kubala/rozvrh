@@ -829,6 +829,7 @@ window.ROZVRH_PREFERENCES = {
   "use strict";
 
   const PORTLET_BASE = "/wps/.cz.vsb.edison.edu.study.pass.portlet/jaxrs/scheduleSelection";
+  const PORTLET_FALLBACK = "ns_Z7_SHD09B1A084V90ITII3I3Q30P7_";
   const OPEN_AT = new Date("2026-09-08T10:00:00+02:00").getTime();
   const PREFLIGHT_LEAD_MS = 10_000;
   const FRESH_FOR_START_MS = 30_000;
@@ -836,6 +837,18 @@ window.ROZVRH_PREFERENCES = {
   const BOUNDARY_RETRY_DELAY_MS = 350;
   const BOUNDARY_RETRY_LIMIT = 6;
   const core = window.ROZVRH_OPTIMIZER;
+
+  // Current-semester fallback only. Dynamic DOM discovery is preferred; every
+  // fallback mapping is validated against the returned subject data before use.
+  const KNOWN_OBLIGATIONS = new Map([
+    ["440210401", 7860483], // ZDS
+    ["460205103", 7860492], // ULM
+    ["460205205", 7860487], // UPR
+    ["460207901", 7860488], // ZIT
+    ["470220501", 7860490], // LA
+    ["711043901", 7860499], // PvICT
+    ["712012401", 7860493]  // A/I-FEI
+  ]);
 
   if (!core || !window.ROZVRH_DATA || !window.ROZVRH_FIXED_PLANS || !window.ROZVRH_PREFERENCES) {
     console.error("EDISON Rozvrh Assistant: bundled optimizer data are missing.");
@@ -880,38 +893,73 @@ window.ROZVRH_PREFERENCES = {
   function portletId() {
     const exact = document.querySelector('[id$=":subjectsTable"]');
     if (exact?.id) return exact.id.replace(/:subjectsTable$/, "");
+
     const loose = document.querySelector('[id*="subjectsTable"]');
     if (loose?.id) return loose.id.replace(/:subjectsTable.*$/, "");
+
     const hidden = document.querySelector('input[name="portletId"]');
     if (hidden?.value) return hidden.value;
+
+    // Try to derive the namespace from any element close to the schedule portlet.
+    const scheduleLink = document.querySelector('[onclick*="selectStudyYearObligation"]');
+    let node = scheduleLink;
+    for (let i = 0; node && i < 7; i += 1, node = node.parentElement) {
+      const ownId = node.id || "";
+      const match = ownId.match(/^(ns_Z7_[A-Z0-9]+_?)(?::|$)/i);
+      if (match) return match[1].endsWith("_") ? match[1] : `${match[1]}_`;
+      const child = node.querySelector?.('[id^="ns_Z7_"]');
+      const childMatch = child?.id?.match(/^(ns_Z7_[A-Z0-9]+_?)(?::|$)/i);
+      if (childMatch) return childMatch[1].endsWith("_") ? childMatch[1] : `${childMatch[1]}_`;
+    }
+
+    // This is the exact portlet namespace observed for the VŠB schedule-selection
+    // portlet. Keeping it as a final fallback avoids a false PAGE_NOT_READY when
+    // EDISON renders the subject list lazily.
+    return PORTLET_FALLBACK;
+  }
+
+  function courseCodeNear(element) {
+    let node = element;
+    for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
+      const titles = Array.from(node.querySelectorAll?.("abbr[title]") || [])
+        .map((item) => item.getAttribute("title") || "")
+        .join(" ");
+      const text = `${titles} ${node.textContent || ""}`;
+      const match = text.match(/\d{3}-\d{4}\/\d{2}/);
+      if (match) return match[0].replace(/\D/g, "");
+    }
     return "";
   }
 
   function discoverObligations() {
-    const table = document.querySelector('[id$=":subjectsTable"]') || document.querySelector('[id*="subjectsTable"]');
-    if (!table) throw Object.assign(new Error("Na tejto stránke nevidím tabuľku predmetov EDISONu."), { code: "PAGE_NOT_READY" });
-
     const found = new Map();
-    for (const row of table.querySelectorAll("tr")) {
-      const texts = [
-        ...Array.from(row.querySelectorAll("abbr[title]")).map((node) => node.getAttribute("title") || ""),
-        row.textContent || ""
-      ].join(" ");
-      const courseNumber = texts.match(/\d{3}-\d{4}\/\d{2}/)?.[0];
-      const code = courseNumber?.replace(/\D/g, "");
-      const onclick = row.querySelector('a[onclick*="selectStudyYearObligation"]')?.getAttribute("onclick") || "";
-      const studyYearObligationId = Number(onclick.match(/selectStudyYearObligation\s*\(\s*(\d+)\s*\)/)?.[1] || onclick.match(/\((\d+)\)/)?.[1]);
-      if (code && Number.isFinite(studyYearObligationId)) {
-        found.set(code, { code, courseNumber, studyYearObligationId });
-      }
+
+    // Do not depend on a specific table id. EDISON can render the portlet after
+    // document-idle or wrap it differently; the action links are the stable part.
+    for (const link of document.querySelectorAll('[onclick*="selectStudyYearObligation"]')) {
+      const onclick = link.getAttribute("onclick") || "";
+      const id = Number(
+        onclick.match(/selectStudyYearObligation\s*\(\s*(\d+)\s*\)/)?.[1]
+        || onclick.match(/\((\d+)\)/)?.[1]
+      );
+      const code = courseCodeNear(link);
+      if (code && Number.isFinite(id)) found.set(code, id);
     }
+
+    // Current-semester validated fallback. This makes the script usable even when
+    // the list is not yet present in the DOM, which is exactly what caused the
+    // PAGE_NOT_READY screenshot.
+    for (const [code, id] of KNOWN_OBLIGATIONS) {
+      if (!found.has(code)) found.set(code, id);
+    }
+
     runtime.obligations = found;
     return found;
   }
 
   async function requestJson(method, path, { allowNetworkRetry = false } = {}) {
     const id = portletId();
-    if (!id) throw Object.assign(new Error("Portlet ID nebol nájdený. Otvor EDISON → Rozvrh → Volba rozvrhu."), { code: "PAGE_NOT_READY" });
+    if (!id) throw Object.assign(new Error("Portlet ID nebol nájdený."), { code: "PAGE_NOT_READY" });
 
     const url = method === "GET"
       ? `${PORTLET_BASE}/${path}?${new URLSearchParams({ portletId: id, _: Date.now() })}`
@@ -1031,7 +1079,8 @@ window.ROZVRH_PREFERENCES = {
     if (runtime.loadingPromise) return runtime.loadingPromise;
     if (runtime.running) return;
 
-    runtime.mode = runtime.mode === "WAITING" ? "WAITING" : "LOADING";
+    const preserveWaiting = runtime.mode === "WAITING";
+    if (!preserveWaiting) runtime.mode = "LOADING";
     runtime.message = label;
     runtime.loadedSubjects = 0;
     render();
@@ -1047,16 +1096,24 @@ window.ROZVRH_PREFERENCES = {
         }
 
         const responses = await mapLimit(subjects, 2, async (subject) => {
-          const mapping = obligations.get(String(subject.code));
-          const response = await requestJson("PUT", `selectStudyYearObligation/${mapping.studyYearObligationId}`);
+          const obligationId = obligations.get(String(subject.code));
+          const response = await requestJson("PUT", `selectStudyYearObligation/${obligationId}`);
+          const activities = normalizedDtos(response.payload).filter((activity) => activity.subjectId === subject.id);
+          if (!activities.length) {
+            throw Object.assign(
+              new Error(`EDISON obligation ${obligationId} nevrátil očakávaný predmet ${subject.short}.`),
+              { code: "MAPPING_ERROR" }
+            );
+          }
           runtime.loadedSubjects += 1;
           render();
-          return { subject, payload: response.payload };
+          return { subject, activities };
         });
 
+        // Authoritative full snapshot: no stale IDs or capacities survive a refresh.
         const fresh = new Map();
-        for (const { payload } of responses) {
-          for (const activity of normalizedDtos(payload)) fresh.set(activity.localSessionId, activity);
+        for (const { activities } of responses) {
+          for (const activity of activities) fresh.set(activity.localSessionId, activity);
         }
         runtime.liveActivities = [...fresh.values()];
 
@@ -1076,11 +1133,13 @@ window.ROZVRH_PREFERENCES = {
         if (resetFailures) localState.unavailable = [];
         runtime.loadedSubjects = subjects.length;
         runtime.lastLoadedAt = Date.now();
-        if (!runtime.running && runtime.mode !== "WAITING") runtime.mode = "READY";
-        runtime.message = `Pripravené: ${runtime.loadedSubjects}/7 predmetov · ${runtime.liveActivities.length} LIVE jednotiek.`;
+        if (!preserveWaiting) runtime.mode = "READY";
+        runtime.message = preserveWaiting
+          ? `Predštartové LIVE dáta sú čerstvé: 7/7. Čakám na 10:00 — nič neklikaj.`
+          : `Pripravené: 7/7 predmetov · ${runtime.liveActivities.length} LIVE jednotiek.`;
       } catch (error) {
         runtime.loadedSubjects = 0;
-        if (!runtime.running && runtime.mode !== "WAITING") runtime.mode = "ERROR";
+        if (!preserveWaiting) runtime.mode = "ERROR";
         runtime.message = `${error.code || "CHYBA"}: ${error.message}`;
         throw error;
       } finally {
@@ -1166,7 +1225,7 @@ window.ROZVRH_PREFERENCES = {
     runtime.mode = "RUNNING";
     runtime.running = true;
     runtime.everStarted = true;
-    runtime.message = "ZÁPIS BEŽÍ — automaticky prepočítavam fallbacky po každej odpovedi.";
+    runtime.message = "ZÁPIS BEŽÍ — nič neklikaj. Fallbacky prepočítavam po každej odpovedi.";
     render();
 
     while (runtime.running) {
@@ -1210,35 +1269,16 @@ window.ROZVRH_PREFERENCES = {
     }
   }
 
-  async function start() {
-    if (runtime.running || runtime.mode === "WAITING") {
-      stop();
-      return;
-    }
-
+  async function ensureFreshThenRun() {
     try {
       if (runtime.loadingPromise) await runtime.loadingPromise;
-
       const stale = Date.now() - runtime.lastLoadedAt > FRESH_FOR_START_MS;
-      if (runtime.loadedSubjects !== 7 || runtime.everStarted || stale) {
-        await loadAllSubjects({ resetFailures: true, label: "Predštartová kontrola 7/7 predmetov…" });
+      if (runtime.loadedSubjects !== 7 || stale) {
+        await loadAllSubjects({ resetFailures: true, label: "Posledná LIVE kontrola 7/7 pred zápisom…" });
       }
-
-      if (runtime.loadedSubjects !== 7) throw Object.assign(new Error("Nemám načítaných 7/7 predmetov."), { code: "MAPPING_ERROR" });
-
-      const now = Date.now();
-      if (now < OPEN_AT) {
-        runtime.mode = "WAITING";
-        runtime.message = `START prijatý. Čakám na 10:00:00 a potom zapisujem automaticky — už nič neklikaj.`;
-        render();
-        runtime.startTimer = setTimeout(async () => {
-          runtime.startTimer = null;
-          if (runtime.mode !== "WAITING") return;
-          await runRegistration();
-        }, Math.max(0, OPEN_AT - Date.now()));
-        return;
+      if (runtime.loadedSubjects !== 7) {
+        throw Object.assign(new Error("Nemám načítaných 7/7 predmetov."), { code: "MAPPING_ERROR" });
       }
-
       await runRegistration();
     } catch (error) {
       runtime.running = false;
@@ -1248,8 +1288,40 @@ window.ROZVRH_PREFERENCES = {
     }
   }
 
-  function metric(value) {
-    return Number(value || 0).toLocaleString("sk-SK", { maximumFractionDigits: 2 });
+  async function start() {
+    // One click means one start. Once waiting/running, the main control is disabled
+    // and can never accidentally toggle into STOP from the same user action.
+    if (runtime.running || runtime.mode === "WAITING" || runtime.mode === "RUNNING" || runtime.mode === "DONE") return;
+
+    try {
+      if (runtime.loadingPromise) await runtime.loadingPromise;
+      const stale = Date.now() - runtime.lastLoadedAt > FRESH_FOR_START_MS;
+      if (runtime.loadedSubjects !== 7 || stale) {
+        await loadAllSubjects({ resetFailures: true, label: "Predštartová kontrola 7/7 predmetov…" });
+      }
+      if (runtime.loadedSubjects !== 7) {
+        throw Object.assign(new Error("Nemám načítaných 7/7 predmetov."), { code: "MAPPING_ERROR" });
+      }
+
+      if (Date.now() < OPEN_AT) {
+        runtime.mode = "WAITING";
+        runtime.message = "START prijatý. O 10:00 sa zápis spustí sám. Už nič neklikaj.";
+        render();
+        runtime.startTimer = setTimeout(async () => {
+          runtime.startTimer = null;
+          if (runtime.mode !== "WAITING") return;
+          await ensureFreshThenRun();
+        }, Math.max(0, OPEN_AT - Date.now()));
+        return;
+      }
+
+      await ensureFreshThenRun();
+    } catch (error) {
+      runtime.running = false;
+      runtime.mode = "ERROR";
+      runtime.message = `${error.code || "CHYBA"}: ${error.message}`;
+      render();
+    }
   }
 
   function formatTimeUntilOpen() {
@@ -1272,10 +1344,24 @@ window.ROZVRH_PREFERENCES = {
     const capacity = next?.activity.concreteActivityCapacity == null
       ? "—"
       : `${next.activity.studentsCount ?? "?"}/${next.activity.concreteActivityCapacity}`;
-    const runningLike = runtime.running || runtime.mode === "WAITING";
-    const buttonLabel = runtime.mode === "DONE" ? "HOTOVO" : runningLike ? "STOP" : "ŠTART ZÁPIS";
-    const buttonClass = runningLike ? "stop" : runtime.mode === "DONE" ? "done" : "start";
-    const buttonDisabled = runtime.mode === "LOADING" || runtime.mode === "DONE";
+
+    let buttonLabel = "ŠTART ZÁPIS";
+    let buttonClass = "start";
+    let buttonDisabled = runtime.mode === "LOADING";
+    if (runtime.mode === "WAITING") {
+      buttonLabel = "ČAKÁM NA 10:00 — SPUSTÍ SA SÁM";
+      buttonClass = "waiting";
+      buttonDisabled = true;
+    } else if (runtime.mode === "RUNNING") {
+      buttonLabel = "ZÁPIS BEŽÍ — NIČ NEKLIKAJ";
+      buttonClass = "running";
+      buttonDisabled = true;
+    } else if (runtime.mode === "DONE") {
+      buttonLabel = "HOTOVO ✓";
+      buttonClass = "done";
+      buttonDisabled = true;
+    }
+
     const exerciseClass = cPassed === 7 ? "passed" : "";
     const lectureClass = pPassed === pTotal ? "passed" : "";
     const lastLoaded = runtime.lastLoadedAt ? new Date(runtime.lastLoadedAt).toLocaleTimeString("sk-SK") : "—";
@@ -1290,18 +1376,19 @@ window.ROZVRH_PREFERENCES = {
         <div class="era-status"><span>LIVE dáta <strong>${runtime.loadedSubjects}/7</strong></span><span>načítané <strong>${escapeHtml(lastLoaded)}</strong></span><span>layouty <strong>${result.remainingCount}</strong></span><span>best <strong>${result.bestRemainingRating ?? "—"}/5</strong></span></div>
         <div class="era-next"><small>Aktuálne by išiel ako ďalší</small><strong>${next ? `${escapeHtml(next.subject?.short)} · ${escapeHtml(next.type)} ${escapeHtml(next.activity.group)}` : result.complete ? "HOTOVO" : "—"}</strong><span>${next ? `${escapeHtml(window.ROZVRH_DATA.days[next.activity.day])} ${escapeHtml(window.ROZVRH_DATA.slots[next.activity.slot])} · kapacita ${escapeHtml(capacity)} · risk ${escapeHtml(next.riskLevel)}` : ""}</span><small>${next ? escapeHtml(next.reason) : ""}</small></div>
         <button class="era-main ${buttonClass}" data-action="main" ${buttonDisabled ? "disabled" : ""}>${escapeHtml(buttonLabel)}</button>
-        <small class="era-foot">Jedno tlačidlo: pred 10:00 START čaká na presný čas; počas zápisu sa zmení na STOP. Cvičenia idú prvé, potom prednášky. TVA sa nezapisuje.</small>
+        <small class="era-foot">EDISON tlačidlo „Obnovit“ nemusíš klikať. Assistant si LIVE dáta načíta sám a 10 s pred 10:00 ich automaticky obnoví. START stlač iba raz.</small>
       </div>`;
   }
 
   function installPanel() {
     const style = document.createElement("style");
-    style.textContent = `#edison-rozvrh-assistant{position:fixed;right:16px;bottom:16px;width:min(440px,calc(100vw - 24px));z-index:2147483647;background:#0b1220;color:#e5eefc;border:1px solid #334155;border-radius:14px;box-shadow:0 20px 60px #0009;font:13px/1.4 system-ui,sans-serif}#edison-rozvrh-assistant *{box-sizing:border-box}.era-head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:11px 13px;border-bottom:1px solid #334155}.era-head span{color:#93c5fd;font-size:11px}.era-body{padding:12px}.era-message{margin-bottom:9px;padding:9px;background:#111c30;border-radius:8px;color:#dbeafe}.era-progress{display:grid;grid-template-columns:1fr 1fr;gap:7px}.era-progress>div{display:flex;flex-direction:column;padding:10px;background:#111827;border:1px solid #334155;border-radius:9px}.era-progress span{color:#94a3b8;font-size:11px}.era-progress strong{font-size:17px}.era-progress .passed{background:#052e1b;border-color:#22c55e}.era-progress .passed strong{color:#86efac}.era-status{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:8px 0}.era-status span{display:flex;flex-direction:column;padding:6px;background:#111c30;border-radius:7px;color:#94a3b8;font-size:10px}.era-status strong{color:#fff;font-size:12px}.era-next{display:flex;flex-direction:column;gap:3px;padding:10px;border:1px solid #334155;border-radius:10px}.era-next strong{font-size:16px}.era-next span,.era-next small{color:#a9b8cc}.era-main{width:100%;margin-top:10px;padding:13px;border-radius:9px;border:1px solid #4ade80;background:#166534;color:#fff;font-weight:900;font-size:16px;cursor:pointer}.era-main.stop{background:#7f1d1d;border-color:#fb7185}.era-main.done{background:#14532d;border-color:#86efac}.era-main:disabled{opacity:.55;cursor:not-allowed}.era-foot{display:block;margin-top:8px;color:#94a3b8}`;
+    style.textContent = `#edison-rozvrh-assistant{position:fixed;right:16px;bottom:16px;width:min(440px,calc(100vw - 24px));z-index:2147483647;background:#0b1220;color:#e5eefc;border:1px solid #334155;border-radius:14px;box-shadow:0 20px 60px #0009;font:13px/1.4 system-ui,sans-serif}#edison-rozvrh-assistant *{box-sizing:border-box}.era-head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:11px 13px;border-bottom:1px solid #334155}.era-head span{color:#93c5fd;font-size:11px}.era-body{padding:12px}.era-message{margin-bottom:9px;padding:9px;background:#111c30;border-radius:8px;color:#dbeafe}.era-progress{display:grid;grid-template-columns:1fr 1fr;gap:7px}.era-progress>div{display:flex;flex-direction:column;padding:10px;background:#111827;border:1px solid #334155;border-radius:9px}.era-progress span{color:#94a3b8;font-size:11px}.era-progress strong{font-size:17px}.era-progress .passed{background:#052e1b;border-color:#22c55e}.era-progress .passed strong{color:#86efac}.era-status{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:8px 0}.era-status span{display:flex;flex-direction:column;padding:6px;background:#111c30;border-radius:7px;color:#94a3b8;font-size:10px}.era-status strong{color:#fff;font-size:12px}.era-next{display:flex;flex-direction:column;gap:3px;padding:10px;border:1px solid #334155;border-radius:10px}.era-next strong{font-size:16px}.era-next span,.era-next small{color:#a9b8cc}.era-main{width:100%;margin-top:10px;padding:13px;border-radius:9px;border:1px solid #4ade80;background:#166534;color:#fff;font-weight:900;font-size:16px;cursor:pointer}.era-main.waiting{background:#1d4ed8;border-color:#60a5fa}.era-main.running{background:#7c3aed;border-color:#c4b5fd}.era-main.done{background:#14532d;border-color:#86efac}.era-main:disabled{opacity:.85;cursor:default}.era-foot{display:block;margin-top:8px;color:#94a3b8}`;
     document.head.appendChild(style);
     panel = document.createElement("aside");
     panel.id = "edison-rozvrh-assistant";
     panel.addEventListener("click", (event) => {
-      if (event.target.closest('[data-action="main"]')) start();
+      const button = event.target.closest('[data-action="main"]');
+      if (button && !button.disabled) start();
     });
     document.body.appendChild(panel);
     render();
@@ -1313,17 +1400,32 @@ window.ROZVRH_PREFERENCES = {
     if (delay <= 0) return;
     runtime.preflightTimer = setTimeout(async () => {
       runtime.preflightTimer = null;
-      if (runtime.running || runtime.mode === "WAITING") return;
+      if (runtime.running) return;
       try {
-        await loadAllSubjects({ resetFailures: true, label: "Automatická predštartová kontrola 09:59:50…" });
+        await loadAllSubjects({ resetFailures: true, label: "Automatická predštartová LIVE kontrola 09:59:50…" });
       } catch {
-        // Panel už obsahuje konkrétnu chybu; START ju vie skúsiť načítať znova.
+        // If this fails, the 10:00 start path performs one final fresh load too.
       }
     }, delay);
   }
 
+  async function initialLoad() {
+    try {
+      await loadAllSubjects({ resetFailures: true, label: "Úvodná read-only kontrola 7/7 predmetov…" });
+    } catch (firstError) {
+      // EDISON often renders portal fragments lazily. One delayed retry catches that
+      // without requiring the user to click the page's own refresh button.
+      await sleep(1200);
+      try {
+        await loadAllSubjects({ resetFailures: true, label: "Opakujem načítanie EDISON dát…" });
+      } catch {
+        // The panel already contains the concrete error. START retries once more.
+      }
+    }
+  }
+
   installPanel();
-  loadAllSubjects({ resetFailures: true, label: "Úvodná read-only kontrola 7/7 predmetov…" }).catch(() => {});
+  initialLoad();
   scheduleAutomaticPreflight();
   setInterval(render, 1000);
 })();
