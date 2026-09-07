@@ -12,7 +12,7 @@
     <div>
       <p class="eyebrow">VŠB-TUO · Zimný semester 2026/27</p>
       <h1>Rozvrh</h1>
-      <p class="subtitle">Termíny predmetov a šablóny rozvrhu na jednom mieste.</p>
+      <p class="subtitle">Termíny predmetov, šablóny a pomocník pri zápise na jednom mieste.</p>
     </div>
     <div class="status-pill">15 min buffer medzi blokmi</div>
   </header>
@@ -21,6 +21,7 @@
     <nav class="tabs" aria-label="Hlavná navigácia">
       <button class="tab is-active" type="button" data-view="subjects">Termíny predmetov</button>
       <button class="tab" type="button" data-view="templates">Šablóny rozvrhu</button>
+      <button id="registrationTab" class="registration-tab" type="button">Zápis LIVE</button>
     </nav>
 
     <section id="subjectsView" class="view">
@@ -69,6 +70,50 @@
       </div>
       <div id="templateSchedule"></div>
     </section>
+
+    <section id="registrationView" class="view" hidden>
+      <div class="registration-intro">
+        <div>
+          <p class="eyebrow">Adaptívny zápis</p>
+          <h2>Klikáš sám, stránka vždy vyberie ďalšie najkritickejšie cvičenie</h2>
+          <p>Po každom ÁNO/NIE sa celý najlepší zostávajúci rozvrh prepočíta. Prednášky sú zatiaľ iba pevné orientačné body a zapisujú sa až na konci.</p>
+        </div>
+        <div class="registration-tools">
+          <button id="registrationUndo" class="secondary-action" type="button">↶ Späť</button>
+          <button id="registrationReset" class="secondary-action danger" type="button">Reset</button>
+        </div>
+      </div>
+
+      <div id="registrationCurrent" aria-live="polite"></div>
+      <div class="registration-actions">
+        <button id="registrationYes" class="decision-btn yes" type="button">✓ ÁNO — zapísané</button>
+        <button id="registrationNo" class="decision-btn no" type="button">× NIE — plné / nevyšlo</button>
+      </div>
+
+      <div class="registration-columns">
+        <section class="registration-panel">
+          <h3>Poradie ďalších klikov</h3>
+          <p class="panel-help">Poradie sa mení podľa toho, čo už máš a čo je plné.</p>
+          <div id="registrationPriority"></div>
+        </section>
+        <section class="registration-panel">
+          <h3>Stav zápisu</h3>
+          <div id="registrationProgress"></div>
+          <h3 class="history-title">Posledné kroky</h3>
+          <div id="registrationHistory"></div>
+        </section>
+      </div>
+
+      <section class="registration-panel schedule-panel">
+        <div class="schedule-panel-head">
+          <div>
+            <h3>Aktuálne najlepší možný rozvrh</h3>
+            <p class="panel-help">✓ = už potvrdené cvičenie. Neoznačené cvičenia sú zatiaľ plán, ktorý sa môže po NIE zmeniť.</p>
+          </div>
+        </div>
+        <div id="registrationSchedule"></div>
+      </section>
+    </section>
   </main>
 
   <footer>
@@ -78,5 +123,6 @@
   <script src="data.js"></script>
   <script src="fixes.js"></script>
   <script src="app.js"></script>
+  <script src="registration.js"></script>
 </body>
 </html>
