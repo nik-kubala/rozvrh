@@ -8,10 +8,10 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Rozvrh VŠB-TUO</title>
-  <link rel="stylesheet" href="styles.css?v=20260907-1940">
-  <link rel="stylesheet" href="registration.css?v=20260907-1940">
-  <link rel="stylesheet" href="plan-review.css?v=20260907-1940">
-  <link rel="stylesheet" href="time-grid.css?v=20260907-1940">
+  <link rel="stylesheet" href="styles.css?v=20260907-2154">
+  <link rel="stylesheet" href="registration.css?v=20260907-2154">
+  <link rel="stylesheet" href="plan-review.css?v=20260907-2154">
+  <link rel="stylesheet" href="time-grid.css?v=20260907-2154">
 </head>
 <body>
   <header class="site-header">
@@ -83,7 +83,7 @@
         <div>
           <p class="eyebrow">Pevná databáza fallbackov</p>
           <h2>Ohodnoť každý rozvrh 1 / 2 / 3 / 4 / 5</h2>
-          <p><strong>1</strong> = top, presne takýto chcem. <strong>2</strong> = veľmi dobrý. <strong>3</strong> = normálne OK. <strong>4</strong> = iba ako núdzový fallback. <strong>5</strong> = nechcem vôbec. Takto z exportu oveľa presnejšie pochopím, aký typ rozvrhu preferuješ.</p>
+          <p><strong>1</strong> = top, presne takýto chcem. <strong>2</strong> = veľmi dobrý. <strong>3</strong> = normálne OK. <strong>4</strong> = iba ako núdzový fallback. <strong>5</strong> = nechcem vôbec. Dve kompletné kolá hodnotenia už má LIVE spriemerované a napevno uložené; toto zobrazenie môžeš ďalej používať na kontrolu.</p>
         </div>
         <div class="review-tools">
           <button id="planReviewExport" class="secondary-action" type="button">↓ Export JSON</button>
@@ -142,9 +142,9 @@
     <section id="registrationView" class="view" hidden>
       <div class="registration-intro">
         <div>
-          <p class="eyebrow">Adaptívny zápis z tebou ohodnotených fallbackov</p>
-          <h2>LIVE používa rozvrhy 1 až 4 a vždy preferuje nižšie hodnotenie</h2>
-          <p>Jednotky sú prvá voľba, potom 2, 3 a až nakoniec núdzové 4. Rozvrhy s hodnotením 5 sú úplne zakázané. Po každom ÁNO/NIE sa vyradia nekompatibilné layouty a stránka vyberie ďalšie najkritickejšie cvičenie.</p>
+          <p class="eyebrow">Adaptívny zápis z dvoch spriemerovaných hodnotení</p>
+          <h2>LIVE chráni čo najviac kvalitných fallbackov a najskôr rieši kritické predmety</h2>
+          <p>Preferencia je napevno vypočítaná z oboch tvojich kompletných hodnotení. 09:00 je ideál, 10:45 je stále veľmi dobré a 07:15 sa uprednostní pred poobednými blokmi. Silno sa drží Po–St; ak musí použiť štvrtok, tlačí ho čo najskôr ráno. Rozvrhy, ktoré dostali v oboch kolách 5, sú úplne zakázané. Pri každom kroku sa zároveň pozerá, koľko kvalitných fallbackov zostane po ÁNO aj po NIE, a vyššiu prioritu majú ZIT, algebra, programovanie a ďalšie rozvrhovo kritické predmety.</p>
         </div>
         <div class="registration-tools">
           <button id="registrationUndo" class="secondary-action" type="button">↶ Späť</button>
@@ -161,7 +161,7 @@
       <div class="registration-columns">
         <section class="registration-panel">
           <h3>Poradie ďalších klikov</h3>
-          <p class="panel-help">Priorita sa počíta podľa toho, koľko tvojich použiteľných fallbackov by neúspech ohrozil.</p>
+          <p class="panel-help">Poradie kombinuje dôležitosť predmetu, stratu kvalitných fallbackov pri NIE, dostupné skupiny v rovnakom čase a zhoršenie najlepšieho zostávajúceho rozvrhu.</p>
           <div id="registrationPriority"></div>
         </section>
         <section class="registration-panel">
@@ -175,8 +175,8 @@
       <section class="registration-panel schedule-panel">
         <div class="schedule-panel-head">
           <div>
-            <h3>Najlepší stále možný schválený rozvrh</h3>
-            <p class="panel-help">✓ = už potvrdené. Ostatné bloky sú z najlepšie hodnoteného fallbacku 1–4, ktorý ešte zostáva možný.</p>
+            <h3>Robustný stále možný rozvrh</h3>
+            <p class="panel-help">Nie je to iba najnižšie číslo. Systém vyberá kvalitný rozvrh, ktorého jednotlivé termíny sú zároveň podporené čo najväčším množstvom ďalších kvalitných fallbackov.</p>
           </div>
         </div>
         <div id="registrationSchedule"></div>
@@ -188,13 +188,14 @@
     Dáta sú prepísané zo screenshotov VŠB-TUO z 7. 9. 2026. Rozsah výuky sa interpretuje ako prednáška + cvičenie.
   </footer>
 
-  <script src="data.js?v=20260907-1940"></script>
-  <script src="fixes.js?v=20260907-1940"></script>
-  <script src="fixed-plans.js?v=20260907-1940"></script>
-  <script src="fixed-plan-utils.js?v=20260907-1940"></script>
-  <script src="app.js?v=20260907-1940"></script>
-  <script src="plan-review.js?v=20260907-1940"></script>
-  <script src="registration.js?v=20260907-1940"></script>
-  <script src="time-grid.js?v=20260907-1940"></script>
+  <script src="data.js?v=20260907-2154"></script>
+  <script src="fixes.js?v=20260907-2154"></script>
+  <script src="fixed-plans.js?v=20260907-2154"></script>
+  <script src="fixed-plan-utils.js?v=20260907-2154"></script>
+  <script src="preferences.js?v=20260907-2154"></script>
+  <script src="app.js?v=20260907-2154"></script>
+  <script src="plan-review.js?v=20260907-2154"></script>
+  <script src="registration.js?v=20260907-2154"></script>
+  <script src="time-grid.js?v=20260907-2154"></script>
 </body>
 </html>
