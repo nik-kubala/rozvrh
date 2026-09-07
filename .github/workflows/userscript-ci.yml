@@ -1,0 +1,43 @@
+name: Verify and build EDISON userscript
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "optimizer-core.js"
+      - "data.js"
+      - "fixes.js"
+      - "fixed-plans.js"
+      - "preferences.js"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - ".github/workflows/userscript-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run optimizer tests
+        run: npm test
+      - name: Build self-contained Tampermonkey userscript
+        run: npm run build:userscript
+      - name: Commit generated userscript when changed
+        run: |
+          if git diff --quiet -- edison-rozvrh-assistant.user.js; then
+            echo "Generated userscript is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add edison-rozvrh-assistant.user.js
+          git commit -m "build: refresh EDISON userscript"
+          git push
