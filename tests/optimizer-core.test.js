@@ -120,8 +120,7 @@ test("plány nemajú kolízie, používajú jeden C čas na predmet a nikdy rati
     const events = [...anchors, ...fixedPlans.subjects.map((subjectId) => ({ ...plan.bySubject[subjectId], subjectId, type: "C" }))];
     for (let i = 0; i < events.length; i += 1) {
       for (let j = i + 1; j < events.length; j += 1) {
-        const allowedAlternatingProgramming = events[i]?.id?.startsWith("programming-p") && events[j]?.id?.startsWith("programming-p");
-        if (!allowedAlternatingProgramming) assert.notDeepEqual([events[i].day, events[i].slot], [events[j].day, events[j].slot], `${plan.id} kolízia`);
+        assert.notDeepEqual([events[i].day, events[i].slot], [events[j].day, events[j].slot], `${plan.id} kolízia`);
       }
     }
   }
@@ -135,7 +134,7 @@ test("medzi susednými blokmi je 15-minútový buffer", () => {
   }
 });
 
-test("optimizer dokončí 7 cvičení a až potom všetkých 5 prednáškových požiadaviek", () => {
+test("optimizer dokončí 7 cvičení a až potom všetky 4 prednáškové požiadavky", () => {
   const live = makeLive();
   const state = { liveActivities: live, locked: {}, unavailable: [] };
   let steps = 0;
@@ -148,9 +147,27 @@ test("optimizer dokončí 7 cvičení a až potom všetkých 5 prednáškových 
     state.locked[next.requirementKey] = next.activity.concreteActivityId;
     steps += 1;
   }
-  assert.equal(steps, 12);
+  assert.equal(steps, 11);
   assert.equal(optimizer.analyze(state).complete, true);
-  assert.ok(state.locked["lecture:programming:p01"] || state.locked["lecture:programming:p02"] || Object.keys(state.locked).filter((key) => key.startsWith("lecture:programming")).length === 2);
+  assert.ok(state.locked["lecture:programming"]);
+  assert.equal(Object.keys(state.locked).filter((key) => key.startsWith("lecture:programming")).length, 1);
+});
+
+test("Programming P/01 a P/02 sú alternatívy: ak je prvá plná, vyberie druhú", () => {
+  const live = full(makeLive(), "programming-p01");
+  const exerciseLocks = {};
+  const initial = optimizer.analyze({ liveActivities: live });
+  for (const subjectId of fixedPlans.subjects) {
+    const plan = initial.targetInfo.plan;
+    const coord = plan.bySubject[subjectId];
+    const activity = initial.liveActivities.find((item) => item.subjectId === subjectId && item.type === "C" && item.day === coord.day && item.slot === coord.slot && item.hasFreePlaces !== false);
+    assert.ok(activity);
+    exerciseLocks[subjectId] = activity.concreteActivityId;
+  }
+  const result = optimizer.analyze({ liveActivities: live, locked: exerciseLocks, unavailable: [] });
+  const programmingLecture = result.lecturePriorities.find((item) => item.requirementKey === "lecture:programming");
+  assert.ok(programmingLecture);
+  assert.equal(programmingLecture.activity.localSessionId, "programming-p02");
 });
 
 test("capacity pressure dá 23/25 výrazne vyššie riziko než 0/94", () => {
