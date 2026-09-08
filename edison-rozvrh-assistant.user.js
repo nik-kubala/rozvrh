@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EDISON Rozvrh Assistant
 // @namespace    https://github.com/nik-kubala/rozvrh
-// @version      2.2.2
+// @version      2.2.3
 // @description  Jedným klikom spustí adaptívny zápis rozvrhu VŠB-TUO; sám obnoví LIVE dáta, bezpečne čaká na 10:00 a má predštartový API test.
 // @author       nik-kubala
 // @match        https://edison.sso.vsb.cz/wps/myportal/student/rozvrh/volba-rozvrhu/*
@@ -522,7 +522,11 @@
 (() => {
   "use strict";
 
-  const core = globalThis.ROZVRH_OPTIMIZER;
+  // Tampermonkey can expose globalThis through a userscript wrapper even with
+  // @grant none. The runtime itself reads window.ROZVRH_OPTIMIZER, so patch
+  // that exact object in the browser, while still remaining testable in Node.
+  const targetWindow = typeof window !== "undefined" ? window : globalThis;
+  const core = targetWindow.ROZVRH_OPTIMIZER || globalThis.ROZVRH_OPTIMIZER;
   if (!core || typeof core.classifyActivityResponse !== "function" || core.__edisonEnglishClassifierPatch) return;
 
   const original = core.classifyActivityResponse.bind(core);
