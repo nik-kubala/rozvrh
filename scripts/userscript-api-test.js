@@ -93,7 +93,7 @@
           .filter((activity) => activity.subjectId === subject.id && Number.isFinite(activity.concreteActivityId));
         if (!activities.length) throw new Error(`${subject.short}: response neobsahuje očakávané activity.`);
         liveActivities.push(...activities);
-        testState.detail = `Load PASS ${liveActivities.length ? subjects.indexOf(subject) + 1 : 0}/7 · ${subject.short}`;
+        testState.detail = `Load PASS ${subjects.indexOf(subject) + 1}/7 · ${subject.short}`;
         inject();
       }
 
@@ -101,7 +101,7 @@
         activity.selected !== true &&
         Number.isFinite(activity.concreteActivityId) &&
         (activity.hasFreePlaces === false ||
-          (Number(activity.concreteActivityCapacity) === 0) ||
+          Number(activity.concreteActivityCapacity) === 0 ||
           (Number.isFinite(Number(activity.concreteActivityCapacity)) &&
            Number.isFinite(Number(activity.studentsCount)) &&
            Number(activity.studentsCount) >= Number(activity.concreteActivityCapacity)))
@@ -148,9 +148,8 @@
   function inject() {
     const panel = document.getElementById("edison-rozvrh-assistant");
     if (!panel) return;
-    const body = panel.querySelector(".era-body");
     const main = panel.querySelector('[data-action="main"]');
-    if (!body || !main) return;
+    if (!main) return;
 
     let box = panel.querySelector(".era-api-test-box");
     if (!box) {
@@ -161,6 +160,18 @@
 
     const disabled = testState.running || Date.now() >= OPEN_AT - TEST_CUTOFF_MS;
     const statusClass = `era-api-${testState.status}`;
+    const signature = JSON.stringify([
+      testState.label,
+      testState.detail,
+      statusClass,
+      disabled
+    ]);
+
+    // The main panel is re-rendered once per second. Rebuild this small box only
+    // when it was recreated or its visible state changed. Never observe our own
+    // DOM mutations: that caused a MutationObserver feedback loop in v2.2.0.
+    if (box.dataset.signature === signature) return;
+    box.dataset.signature = signature;
     box.innerHTML = `<button type="button" class="era-api-test ${statusClass}" ${disabled ? "disabled" : ""}>${testState.label}</button><small>${testState.detail}</small>`;
     const button = box.querySelector("button");
     if (button && !button.disabled) button.addEventListener("click", runApiTest, { once: true });
@@ -170,8 +181,10 @@
   style.textContent = `.era-api-test-box{display:flex;flex-direction:column;gap:5px;margin-top:8px}.era-api-test{width:100%;padding:9px 10px;border-radius:8px;border:1px solid #64748b;background:#1e293b;color:#e2e8f0;font-weight:800;cursor:pointer}.era-api-test:disabled{opacity:.65;cursor:default}.era-api-passed{background:#14532d;border-color:#4ade80}.era-api-failed,.era-api-danger{background:#7f1d1d;border-color:#fb7185}.era-api-partial{background:#854d0e;border-color:#facc15}.era-api-test-box small{color:#94a3b8}`;
   document.head.appendChild(style);
 
-  const observer = new MutationObserver(inject);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  setInterval(inject, 750);
+  // Poll lightly because the main runtime replaces its panel markup every second.
+  // A MutationObserver is intentionally NOT used here: changing the injected box
+  // from inside the observer retriggered it indefinitely and could freeze EDISON.
+  const injectTimer = setInterval(inject, 250);
+  window.addEventListener("beforeunload", () => clearInterval(injectTimer), { once: true });
   inject();
 })();
