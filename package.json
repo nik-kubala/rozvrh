@@ -4,7 +4,7 @@
   "type": "commonjs",
   "scripts": {
     "build:userscript": "node scripts/build-userscript.mjs",
-    "check:userscript": "node --check scripts/userscript-classifier-patch.js && node --check scripts/userscript-runtime.js && node --check scripts/userscript-api-test.js && node --check edison-rozvrh-assistant.user.js",
+    "check:userscript": "node --check scripts/userscript-classifier-patch.js && node --check scripts/userscript-teacher-preferences.js && node --check scripts/userscript-runtime.js && node --check scripts/userscript-api-test.js && node --check edison-rozvrh-assistant.user.js",
     "test": "node --test tests/*.test.js"
   }
 }
