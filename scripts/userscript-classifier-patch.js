@@ -1,7 +1,11 @@
 (() => {
   "use strict";
 
-  const core = globalThis.ROZVRH_OPTIMIZER;
+  // Tampermonkey can expose globalThis through a userscript wrapper even with
+  // @grant none. The runtime itself reads window.ROZVRH_OPTIMIZER, so patch
+  // that exact object first to guarantee both the real registration flow and
+  // the API test see the same classifier.
+  const core = window.ROZVRH_OPTIMIZER || globalThis.ROZVRH_OPTIMIZER;
   if (!core || typeof core.classifyActivityResponse !== "function" || core.__edisonEnglishClassifierPatch) return;
 
   const original = core.classifyActivityResponse.bind(core);
